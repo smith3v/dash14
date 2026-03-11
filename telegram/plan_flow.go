@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/overlay"
 	"github.com/smith3v/dash14/storage"
 )
 
@@ -40,6 +41,32 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 	if !ok {
+		return
+	}
+	if r.games == nil {
+		r.logger.ErrorContext(ctx, "handlePlan: game repository is nil", "user_id", userID)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+
+	nonFinished, err := r.games.GetNonFinishedGame()
+	if err != nil {
+		r.logger.ErrorContext(ctx, "handlePlan: failed to check current game",
+			"user_id", userID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+	if nonFinished != nil {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Cannot run /plan: another game is still planned or in progress.",
+		})
 		return
 	}
 
@@ -88,7 +115,7 @@ func (r *Router) handlePlanText(ctx context.Context, _ *bot.Bot, update *models.
 		return
 	}
 
-	// HomeTeam is already set — guest team search will be handled in Task 17.
+	r.searchAndSelectGuestTeam(ctx, userID, chatID, query, state)
 }
 
 // searchAndSelectHomeTeam performs a team search for the home-team step of the
@@ -218,5 +245,188 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 			ChatID: chatID,
 			Text:   fmt.Sprintf("Home team: %s\nPlease enter the guest team name:", team.Name),
 		})
+
+	case strings.HasPrefix(data, "plan:guest:"):
+		idStr := strings.TrimPrefix(data, "plan:guest:")
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			r.logger.WarnContext(ctx, "handlePlanCallback: invalid guest team id in callback",
+				"user_id", userID, "data", data)
+			return
+		}
+		team, err := r.teams.GetTeamByID(uint(id))
+		if err != nil {
+			r.logger.ErrorContext(ctx, "handlePlanCallback: get guest team by id failed",
+				"user_id", userID, "team_id", id, "err", err)
+			_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: chatID,
+				Text:   "Something went wrong. Please try again.",
+			})
+			return
+		}
+		r.finalizePlannedGame(ctx, userID, chatID, state, team)
 	}
+}
+
+// searchAndSelectGuestTeam performs the guest-team search step. It mirrors the
+// home-team flow, but finalises game creation once a guest team is selected.
+func (r *Router) searchAndSelectGuestTeam(
+	ctx context.Context,
+	userID, chatID int64,
+	query string,
+	state *planState,
+) {
+	if r.teams == nil {
+		r.logger.ErrorContext(ctx, "searchAndSelectGuestTeam: teams repository is nil", "user_id", userID)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+
+	teams, err := r.teams.SearchTeams(query, planSearchLimit)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "searchAndSelectGuestTeam: search failed",
+			"user_id", userID, "query", query, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+
+	switch {
+	case len(teams) == 0:
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "No teams found. Try again.",
+		})
+
+	case len(teams) == 1:
+		selected := &teams[0]
+		r.finalizePlannedGame(ctx, userID, chatID, state, selected)
+
+	case len(teams) <= 8:
+		buttons := make([][]models.InlineKeyboardButton, 0, len(teams))
+		for _, team := range teams {
+			btn := models.InlineKeyboardButton{
+				Text:         team.Name,
+				CallbackData: fmt.Sprintf("plan:guest:%d", team.ID),
+			}
+			buttons = append(buttons, []models.InlineKeyboardButton{btn})
+		}
+		keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID:      chatID,
+			Text:        "Select the guest team:",
+			ReplyMarkup: keyboard,
+		})
+
+	default:
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Too many results. Please refine your search.",
+		})
+	}
+}
+
+// finalizePlannedGame completes the /plan flow by creating a planned game and
+// rendering the planned overlay.
+func (r *Router) finalizePlannedGame(
+	ctx context.Context,
+	userID, chatID int64,
+	state *planState,
+	guestTeam *storage.Team,
+) {
+	if state.HomeTeam == nil {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Please select the home team first.",
+		})
+		return
+	}
+	if r.games == nil || r.renderer == nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: dependencies missing",
+			"user_id", userID, "has_games", r.games != nil, "has_renderer", r.renderer != nil)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+
+	nonFinished, err := r.games.GetNonFinishedGame()
+	if err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: check non-finished game failed",
+			"user_id", userID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+	if nonFinished != nil {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Cannot run /plan: another game is still planned or in progress.",
+		})
+		return
+	}
+
+	game := &storage.Game{
+		HomeTeamID:         state.HomeTeam.ID,
+		GuestTeamID:        guestTeam.ID,
+		HomeTeamSide:       "left",
+		GuestTeamSide:      "right",
+		CurrentSetNumber:   1,
+		Status:             storage.GameStatusPlanned,
+		CurrentAdminUserID: userID,
+	}
+	if err := r.games.CreateGame(game); err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: create game failed",
+			"user_id", userID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+	if err := r.games.SetCurrentGameID(game.ID); err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: set current game failed",
+			"user_id", userID, "game_id", game.ID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Something went wrong. Please try again.",
+		})
+		return
+	}
+
+	vm := overlay.PlannedViewModel{
+		HomeTeamName:       state.HomeTeam.Name,
+		HomeTeamShortName:  state.HomeTeam.ShortName,
+		HomeTeamLogoPath:   state.HomeTeam.LogoPath,
+		GuestTeamName:      guestTeam.Name,
+		GuestTeamShortName: guestTeam.ShortName,
+		GuestTeamLogoPath:  guestTeam.LogoPath,
+	}
+	if err := r.renderer.RenderPlanned(vm); err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: render planned overlay failed",
+			"user_id", userID, "game_id", game.ID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Game was planned, but overlay rendering failed. Please check logs.",
+		})
+		return
+	}
+
+	r.plans.Delete(userID)
+	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text: fmt.Sprintf(
+			"Planned game created: %s vs %s.",
+			state.HomeTeam.Name,
+			guestTeam.Name,
+		),
+	})
 }

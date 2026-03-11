@@ -53,6 +53,23 @@ func (r *GameRepository) GetCurrentGame() (*Game, error) {
 	return r.GetGameByID(*state.CurrentGameID)
 }
 
+// GetNonFinishedGame returns one game whose status is not finished.
+// It returns nil, nil when no planned/in-progress game exists.
+func (r *GameRepository) GetNonFinishedGame() (*Game, error) {
+	var game Game
+	err := r.db.
+		Where("status <> ?", GameStatusFinished).
+		Order("id DESC").
+		First(&game).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("storage: get non-finished game: %w", err)
+	}
+	return &game, nil
+}
+
 // GetGameByID returns the game with the given ID. It returns a wrapped
 // gorm.ErrRecordNotFound when no game exists with that ID.
 func (r *GameRepository) GetGameByID(id uint) (*Game, error) {

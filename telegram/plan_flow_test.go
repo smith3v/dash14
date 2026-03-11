@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/overlay"
 	"github.com/smith3v/dash14/storage"
 )
 
@@ -16,6 +17,22 @@ import (
 type planTestStore struct {
 	*testStore
 	teams *storage.TeamRepository
+	games *storage.GameRepository
+}
+
+type fakeOverlayRenderer struct {
+	planned []overlay.PlannedViewModel
+	live    []overlay.LiveViewModel
+}
+
+func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
+	f.planned = append(f.planned, vm)
+	return nil
+}
+
+func (f *fakeOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
+	f.live = append(f.live, vm)
+	return nil
 }
 
 // openPlanTestStore creates an isolated SQLite database with all migrations
@@ -36,6 +53,7 @@ func openPlanTestStore(t *testing.T) *planTestStore {
 			users: storage.NewUserRepository(db),
 		},
 		teams: storage.NewTeamRepository(db),
+		games: storage.NewGameRepository(db),
 	}
 }
 
@@ -60,12 +78,14 @@ func insertTeam(t *testing.T, repo *storage.TeamRepository, key, name, shortName
 
 // newPlanRouter creates a Router wired to a FakeBot and the given store, with
 // both the users and teams repositories populated.
-func newPlanRouter(t *testing.T, store *planTestStore) (*Router, *FakeBot) {
+func newPlanRouter(t *testing.T, store *planTestStore) (*Router, *FakeBot, *fakeOverlayRenderer) {
 	t.Helper()
 	fb := &FakeBot{}
+	renderer := &fakeOverlayRenderer{}
 	b := newTestBot(t)
 	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
-	return r, fb
+	r.SetGameServices(store.games, renderer)
+	return r, fb, renderer
 }
 
 // makePlainTextUpdate builds a *models.Update that looks like a plain text
@@ -114,7 +134,7 @@ func makeCallbackUpdate(userID int64, chatID int64, callbackID, data string) *mo
 // an authorisation rejection when they issue /plan.
 func TestPlanNonAdminRejected(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, fb := newPlanRouter(t, store)
+	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
 
 	const userID int64 = 7001
@@ -149,7 +169,7 @@ func TestPlanNonAdminRejected(t *testing.T) {
 // wizard auto-selects it and moves on to ask for the guest team.
 func TestPlan1Match(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, fb := newPlanRouter(t, store)
+	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
 
 	const userID int64 = 7002
@@ -203,7 +223,7 @@ func TestPlan1Match(t *testing.T) {
 // presents an inline keyboard so the admin can pick one.
 func TestPlan2To8Matches(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, fb := newPlanRouter(t, store)
+	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
 
 	const userID int64 = 7003
@@ -293,7 +313,7 @@ func TestPlan2To8Matches(t *testing.T) {
 // wizard asks the admin to refine the search rather than displaying a huge list.
 func TestPlanMoreThan8(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, fb := newPlanRouter(t, store)
+	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
 
 	const userID int64 = 7004
@@ -324,5 +344,96 @@ func TestPlanMoreThan8(t *testing.T) {
 	}
 	if last.ReplyMarkup != nil {
 		t.Error("expected no inline keyboard for >8 results, got one")
+	}
+}
+
+// TestPlanCreateGameFromGuestSelection verifies that after selecting home and
+// guest teams, /plan creates a planned game, assigns the current admin, sets
+// app state, and renders the planned overlay.
+func TestPlanCreateGameFromGuestSelection(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 7101
+	const chatID int64 = 8101
+	store.createAdminUser(t, userID, "planner")
+
+	home := insertTeam(t, store.teams, "home", "Home Club", "HOM")
+	guest := insertTeam(t, store.teams, "guest", "Guest Club", "GST")
+
+	r.handlePlan(ctx, nil, makeTextUpdate(userID, chatID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Home"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Guest"))
+
+	current, err := store.games.GetCurrentGame()
+	if err != nil {
+		t.Fatalf("GetCurrentGame: %v", err)
+	}
+	if current == nil {
+		t.Fatal("expected current game after /plan completion")
+	}
+	if current.Status != storage.GameStatusPlanned {
+		t.Fatalf("expected planned status, got %q", current.Status)
+	}
+	if current.HomeTeamID != home.ID || current.GuestTeamID != guest.ID {
+		t.Fatalf("unexpected teams on planned game: home=%d guest=%d", current.HomeTeamID, current.GuestTeamID)
+	}
+	if current.CurrentAdminUserID != userID {
+		t.Fatalf("expected current_admin_user_id=%d, got %d", userID, current.CurrentAdminUserID)
+	}
+
+	if len(renderer.planned) != 1 {
+		t.Fatalf("expected exactly one planned render call, got %d", len(renderer.planned))
+	}
+	vm := renderer.planned[0]
+	if vm.HomeTeamName != home.Name || vm.GuestTeamName != guest.Name {
+		t.Fatalf("unexpected planned view model teams: %#v", vm)
+	}
+
+	msgs := fb.SentMessages()
+	last := msgs[len(msgs)-1]
+	if !strings.Contains(last.Text, "Planned game created") {
+		t.Fatalf("expected success confirmation message, got %q", last.Text)
+	}
+}
+
+// TestPlanRejectedWhenNonFinishedGameExists verifies /plan is blocked when
+// there is already a planned or in-progress game.
+func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 7102
+	const chatID int64 = 8102
+	store.createAdminUser(t, userID, "planner2")
+
+	home := insertTeam(t, store.teams, "home2", "Home Two", "H2")
+	guest := insertTeam(t, store.teams, "guest2", "Guest Two", "G2")
+	existing := &storage.Game{
+		HomeTeamID:       home.ID,
+		GuestTeamID:      guest.ID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusPlanned,
+		CurrentSetNumber: 1,
+	}
+	if err := store.games.CreateGame(existing); err != nil {
+		t.Fatalf("CreateGame: %v", err)
+	}
+	if err := store.games.SetCurrentGameID(existing.ID); err != nil {
+		t.Fatalf("SetCurrentGameID: %v", err)
+	}
+
+	r.handlePlan(ctx, nil, makeTextUpdate(userID, chatID, "/plan"))
+
+	msgs := fb.SentMessages()
+	if len(msgs) == 0 {
+		t.Fatal("expected rejection message")
+	}
+	last := msgs[len(msgs)-1]
+	if !strings.Contains(last.Text, "another game is still planned or in progress") {
+		t.Fatalf("unexpected rejection message: %q", last.Text)
 	}
 }

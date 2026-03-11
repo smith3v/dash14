@@ -20,12 +20,14 @@ import (
 // FakeBot implements BotClient and records every call made to it.
 // It is safe for concurrent use from multiple handler goroutines.
 type FakeBot struct {
-	mu   sync.Mutex
-	sent []sentMessage
+	mu            sync.Mutex
+	sent          []sentMessage
+	nextMessageID int
 }
 
 // sentMessage captures the arguments of a SendMessage call.
 type sentMessage struct {
+	MessageID   int
 	ChatID      int64
 	Text        string
 	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
@@ -36,13 +38,20 @@ func (f *FakeBot) SendMessage(_ context.Context, params *bot.SendMessageParams) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.nextMessageID == 0 {
+		f.nextMessageID = 1
+	}
+	msgID := f.nextMessageID
+	f.nextMessageID++
+
 	chatID, _ := params.ChatID.(int64)
 	f.sent = append(f.sent, sentMessage{
+		MessageID:   msgID,
 		ChatID:      chatID,
 		Text:        params.Text,
 		ReplyMarkup: params.ReplyMarkup,
 	})
-	return &models.Message{ID: 1}, nil
+	return &models.Message{ID: msgID}, nil
 }
 
 // EditMessageText records the call and returns a minimal *models.Message.

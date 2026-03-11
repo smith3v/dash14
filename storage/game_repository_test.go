@@ -306,3 +306,68 @@ func TestAppStateSingleton(t *testing.T) {
 		}
 	})
 }
+
+// TestGetNonFinishedGame verifies that GetNonFinishedGame returns nil when
+// only finished games exist and returns a planned/in-progress game otherwise.
+func TestGetNonFinishedGame(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	repo := storage.NewGameRepository(db)
+
+	t.Run("returns_nil_when_no_rows", func(t *testing.T) {
+		got, err := repo.GetNonFinishedGame()
+		if err != nil {
+			t.Fatalf("GetNonFinishedGame: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil game, got id=%d", got.ID)
+		}
+	})
+
+	finished := &storage.Game{
+		HomeTeamID:       homeID,
+		GuestTeamID:      guestID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusFinished,
+		CurrentSetNumber: 3,
+	}
+	if err := repo.CreateGame(finished); err != nil {
+		t.Fatalf("CreateGame finished: %v", err)
+	}
+
+	t.Run("returns_nil_when_only_finished_exists", func(t *testing.T) {
+		got, err := repo.GetNonFinishedGame()
+		if err != nil {
+			t.Fatalf("GetNonFinishedGame: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil game, got id=%d", got.ID)
+		}
+	})
+
+	planned := &storage.Game{
+		HomeTeamID:       homeID,
+		GuestTeamID:      guestID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusPlanned,
+		CurrentSetNumber: 1,
+	}
+	if err := repo.CreateGame(planned); err != nil {
+		t.Fatalf("CreateGame planned: %v", err)
+	}
+
+	t.Run("returns_non_finished_game", func(t *testing.T) {
+		got, err := repo.GetNonFinishedGame()
+		if err != nil {
+			t.Fatalf("GetNonFinishedGame: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected non-nil game")
+		}
+		if got.ID != planned.ID {
+			t.Fatalf("expected planned game id=%d, got %d", planned.ID, got.ID)
+		}
+	})
+}

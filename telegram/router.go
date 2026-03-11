@@ -1,25 +1,34 @@
 package telegram
 
 import (
-	"context"
 	"log/slog"
 	"sync"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/overlay"
 	"github.com/smith3v/dash14/storage"
 )
+
+// OverlayRenderer captures the overlay rendering operations used by telegram
+// handlers when game state changes.
+type OverlayRenderer interface {
+	RenderPlanned(vm overlay.PlannedViewModel) error
+	RenderLive(vm overlay.LiveViewModel) error
+}
 
 // Router dispatches Telegram updates to the correct handler.
 // Handler dependencies (database repositories, renderer, etc.) will be added
 // as fields here in subsequent tasks.
 type Router struct {
-	b      *bot.Bot
-	logger *slog.Logger
-	client BotClient
-	users  *storage.UserRepository
-	teams  *storage.TeamRepository
-	plans  sync.Map // map[int64]*planState — keyed by Telegram user ID
+	b        *bot.Bot
+	logger   *slog.Logger
+	client   BotClient
+	users    *storage.UserRepository
+	teams    *storage.TeamRepository
+	games    *storage.GameRepository
+	renderer OverlayRenderer
+	plans    sync.Map // map[int64]*planState — keyed by Telegram user ID
 }
 
 // NewRouter creates a Router that registers handlers on b.
@@ -36,6 +45,13 @@ func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage
 	}
 }
 
+// SetGameServices wires game-related dependencies that are optional in early
+// tests but required by /plan completion and /game flows.
+func (r *Router) SetGameServices(games *storage.GameRepository, renderer OverlayRenderer) {
+	r.games = games
+	r.renderer = renderer
+}
+
 // Register wires all command and callback handlers onto the bot.
 // The implementations are stubs; full handler logic is added in later tasks.
 func (r *Router) Register() {
@@ -49,26 +65,8 @@ func (r *Router) Register() {
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "", bot.MatchTypePrefix, r.handlePlanText)
 	// Inline keyboard callbacks for the plan wizard.
 	r.b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "plan:", bot.MatchTypePrefix, r.handlePlanCallback)
-}
-
-// handleGame is the stub handler for /game.
-// It opens or refreshes the inline game control thread for admins.
-func (r *Router) handleGame(ctx context.Context, b *bot.Bot, update *models.Update) {
-	r.logger.InfoContext(ctx, "received /game", "user_id", senderID(update))
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "not implemented yet",
-	})
-}
-
-// handleTakeover is the stub handler for /takeover.
-// It transfers game administration to the calling admin.
-func (r *Router) handleTakeover(ctx context.Context, b *bot.Bot, update *models.Update) {
-	r.logger.InfoContext(ctx, "received /takeover", "user_id", senderID(update))
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "not implemented yet",
-	})
+	// Inline callbacks for the /game control message.
+	r.b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "game:", bot.MatchTypePrefix, r.handleGameCallback)
 }
 
 // senderID returns the Telegram user ID from an update, or 0 if unavailable.
