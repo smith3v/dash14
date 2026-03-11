@@ -7,12 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/storage"
 )
 
 // FakeBot implements BotClient and records every call made to it.
@@ -96,6 +98,21 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// openTestUsers opens a fresh in-process SQLite database, runs migrations, and
+// returns a UserRepository backed by it. Each call produces an isolated store.
+func openTestUsers(t *testing.T) *storage.UserRepository {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := storage.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("openTestUsers: Open: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("openTestUsers: Migrate: %v", err)
+	}
+	return storage.NewUserRepository(db)
+}
+
 // makeTextUpdate builds a minimal *models.Update that looks like a text
 // message command sent by a user with the given userID.
 func makeTextUpdate(userID int64, chatID int64, text string) *models.Update {
@@ -126,7 +143,7 @@ func makeTextUpdate(userID int64, chatID int64, text string) *models.Update {
 // commands onto the bot without panicking.
 func TestRouterRegisterDoesNotPanic(t *testing.T) {
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger())
+	r := NewRouter(b, discardLogger(), &FakeBot{}, nil)
 
 	// Register must not panic.
 	r.Register()
@@ -137,8 +154,9 @@ func TestRouterRegisterDoesNotPanic(t *testing.T) {
 func TestRouterNewRouter(t *testing.T) {
 	b := newTestBot(t)
 	logger := discardLogger()
+	fb := &FakeBot{}
 
-	r := NewRouter(b, logger)
+	r := NewRouter(b, logger, fb, nil)
 	if r == nil {
 		t.Fatal("NewRouter returned nil")
 	}
@@ -147,6 +165,9 @@ func TestRouterNewRouter(t *testing.T) {
 	}
 	if r.logger != logger {
 		t.Error("NewRouter: logger field not set correctly")
+	}
+	if r.client != fb {
+		t.Error("NewRouter: client field not set correctly")
 	}
 }
 
@@ -171,7 +192,8 @@ func TestRouterCommandsAreRouted(t *testing.T) {
 				t.Fatalf("create sync bot: %v", err)
 			}
 
-			r := NewRouter(b, discardLogger())
+			users := openTestUsers(t)
+			r := NewRouter(b, discardLogger(), &FakeBot{}, users)
 			r.Register()
 
 			ctx := context.Background()

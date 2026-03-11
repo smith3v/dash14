@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/storage"
 )
 
 // Router dispatches Telegram updates to the correct handler.
@@ -14,13 +15,19 @@ import (
 type Router struct {
 	b      *bot.Bot
 	logger *slog.Logger
+	client BotClient
+	users  *storage.UserRepository
 }
 
 // NewRouter creates a Router that registers handlers on b.
-func NewRouter(b *bot.Bot, logger *slog.Logger) *Router {
+// client is the BotClient used to send messages (typically b itself, or a
+// FakeBot in tests). users is the UserRepository for subscriber management.
+func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage.UserRepository) *Router {
 	return &Router{
 		b:      b,
 		logger: logger,
+		client: client,
+		users:  users,
 	}
 }
 
@@ -32,26 +39,6 @@ func (r *Router) Register() {
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/plan", bot.MatchTypeExact, r.handlePlan)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/game", bot.MatchTypeExact, r.handleGame)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/takeover", bot.MatchTypeExact, r.handleTakeover)
-}
-
-// handleStart is the stub handler for /start.
-// It subscribes the sender to match updates.
-func (r *Router) handleStart(ctx context.Context, b *bot.Bot, update *models.Update) {
-	r.logger.InfoContext(ctx, "received /start", "user_id", senderID(update))
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "not implemented yet",
-	})
-}
-
-// handleStop is the stub handler for /stop.
-// It unsubscribes the sender from match updates.
-func (r *Router) handleStop(ctx context.Context, b *bot.Bot, update *models.Update) {
-	r.logger.InfoContext(ctx, "received /stop", "user_id", senderID(update))
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "not implemented yet",
-	})
 }
 
 // handlePlan is the stub handler for /plan.
