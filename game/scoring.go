@@ -32,13 +32,22 @@ func DecrementGuest(s SetScore) ScoreResult {
 	return buildResult(s)
 }
 
-// buildResult assembles a ScoreResult from the current SetScore. SideSwitch
-// is always false for sets 1–4; Task 12 will populate it for set 5.
+// buildResult assembles a ScoreResult from the current SetScore.
+//
+// For set 5, SideSwitch is set to true the first time either team reaches
+// 8 points. Once s.SideSwitchedInSet5 is already true, SideSwitch will not
+// fire again. When a side switch is emitted the returned Set carries
+// SideSwitchedInSet5=true so the caller can persist the updated state.
 func buildResult(s SetScore) ScoreResult {
+	sideSwitch := false
+	if s.SetNumber == 5 && !s.SideSwitchedInSet5 && (s.HomeScore >= 8 || s.GuestScore >= 8) {
+		sideSwitch = true
+		s.SideSwitchedInSet5 = true
+	}
 	return ScoreResult{
 		Set:        s,
 		Finishable: isFinishable(s),
-		SideSwitch: false,
+		SideSwitch: sideSwitch,
 	}
 }
 

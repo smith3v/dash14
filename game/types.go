@@ -2,9 +2,10 @@ package game
 
 // SetScore represents the score state of a single set.
 type SetScore struct {
-	HomeScore  int
-	GuestScore int
-	SetNumber  int // 1-5
+	HomeScore          int
+	GuestScore         int
+	SetNumber          int  // 1-5
+	SideSwitchedInSet5 bool // true once the automatic side switch fires in set 5
 }
 
 // ScoreResult is returned by scoring functions and captures the updated set
