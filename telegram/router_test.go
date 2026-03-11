@@ -26,8 +26,9 @@ type FakeBot struct {
 
 // sentMessage captures the arguments of a SendMessage call.
 type sentMessage struct {
-	ChatID int64
-	Text   string
+	ChatID      int64
+	Text        string
+	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
 }
 
 // SendMessage records the call and returns a minimal *models.Message.
@@ -37,8 +38,9 @@ func (f *FakeBot) SendMessage(_ context.Context, params *bot.SendMessageParams) 
 
 	chatID, _ := params.ChatID.(int64)
 	f.sent = append(f.sent, sentMessage{
-		ChatID: chatID,
-		Text:   params.Text,
+		ChatID:      chatID,
+		Text:        params.Text,
+		ReplyMarkup: params.ReplyMarkup,
 	})
 	return &models.Message{ID: 1}, nil
 }
@@ -143,7 +145,7 @@ func makeTextUpdate(userID int64, chatID int64, text string) *models.Update {
 // commands onto the bot without panicking.
 func TestRouterRegisterDoesNotPanic(t *testing.T) {
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger(), &FakeBot{}, nil)
+	r := NewRouter(b, discardLogger(), &FakeBot{}, nil, nil)
 
 	// Register must not panic.
 	r.Register()
@@ -156,7 +158,7 @@ func TestRouterNewRouter(t *testing.T) {
 	logger := discardLogger()
 	fb := &FakeBot{}
 
-	r := NewRouter(b, logger, fb, nil)
+	r := NewRouter(b, logger, fb, nil, nil)
 	if r == nil {
 		t.Fatal("NewRouter returned nil")
 	}
@@ -193,7 +195,7 @@ func TestRouterCommandsAreRouted(t *testing.T) {
 			}
 
 			users := openTestUsers(t)
-			r := NewRouter(b, discardLogger(), &FakeBot{}, users)
+			r := NewRouter(b, discardLogger(), &FakeBot{}, users, nil)
 			r.Register()
 
 			ctx := context.Background()

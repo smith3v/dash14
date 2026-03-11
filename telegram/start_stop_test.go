@@ -57,7 +57,7 @@ func newRouterWithStore(t *testing.T, store *testStore) (*Router, *FakeBot) {
 	t.Helper()
 	fb := &FakeBot{}
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger(), fb, store.users)
+	r := NewRouter(b, discardLogger(), fb, store.users, nil)
 	return r, fb
 }
 
@@ -311,7 +311,7 @@ func TestBroadcastSendsToAllSubscribed(t *testing.T) {
 	store := openTestStore(t)
 	eb := &errBot{failIDs: map[int64]bool{}}
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger(), eb, store.users)
+	r := NewRouter(b, discardLogger(), eb, store.users, nil)
 	ctx := context.Background()
 
 	for _, id := range []int64{3001, 3002, 3003} {
@@ -334,7 +334,7 @@ func TestBroadcastPartialFailureContinues(t *testing.T) {
 	// User 4002 will fail; 4001 and 4003 should still receive the message.
 	eb := &errBot{failIDs: map[int64]bool{4002: true}}
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger(), eb, store.users)
+	r := NewRouter(b, discardLogger(), eb, store.users, nil)
 	ctx := context.Background()
 
 	for _, id := range []int64{4001, 4002, 4003} {
@@ -358,7 +358,7 @@ func TestBroadcastSkipsUnsubscribed(t *testing.T) {
 	store := openTestStore(t)
 	eb := &errBot{failIDs: map[int64]bool{}}
 	b := newTestBot(t)
-	r := NewRouter(b, discardLogger(), eb, store.users)
+	r := NewRouter(b, discardLogger(), eb, store.users, nil)
 	ctx := context.Background()
 
 	for _, id := range []int64{5001, 5002} {

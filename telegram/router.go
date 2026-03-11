@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -17,17 +18,21 @@ type Router struct {
 	logger *slog.Logger
 	client BotClient
 	users  *storage.UserRepository
+	teams  *storage.TeamRepository
+	plans  sync.Map // map[int64]*planState — keyed by Telegram user ID
 }
 
 // NewRouter creates a Router that registers handlers on b.
 // client is the BotClient used to send messages (typically b itself, or a
 // FakeBot in tests). users is the UserRepository for subscriber management.
-func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage.UserRepository) *Router {
+// teams is the TeamRepository used by the /plan wizard.
+func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage.UserRepository, teams *storage.TeamRepository) *Router {
 	return &Router{
 		b:      b,
 		logger: logger,
 		client: client,
 		users:  users,
+		teams:  teams,
 	}
 }
 
@@ -39,16 +44,11 @@ func (r *Router) Register() {
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/plan", bot.MatchTypeExact, r.handlePlan)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/game", bot.MatchTypeExact, r.handleGame)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/takeover", bot.MatchTypeExact, r.handleTakeover)
-}
-
-// handlePlan is the stub handler for /plan.
-// It opens a wizard for admins to create a new planned game.
-func (r *Router) handlePlan(ctx context.Context, b *bot.Bot, update *models.Update) {
-	r.logger.InfoContext(ctx, "received /plan", "user_id", senderID(update))
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "not implemented yet",
-	})
+	// Non-command text is routed to the plan wizard when the user has an
+	// active plan state; otherwise it is silently ignored.
+	r.b.RegisterHandler(bot.HandlerTypeMessageText, "", bot.MatchTypePrefix, r.handlePlanText)
+	// Inline keyboard callbacks for the plan wizard.
+	r.b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "plan:", bot.MatchTypePrefix, r.handlePlanCallback)
 }
 
 // handleGame is the stub handler for /game.
