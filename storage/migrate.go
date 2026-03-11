@@ -14,8 +14,9 @@ import (
 //   - Task 6: Game, GameSet
 //   - Task 7: User
 func Migrate(db *gorm.DB) error {
-	// No models yet — placeholder list will be extended in Tasks 5-7.
-	if err := db.AutoMigrate(); err != nil {
+	if err := db.AutoMigrate(
+		&Team{},
+	); err != nil {
 		return fmt.Errorf("storage: automigrate: %w", err)
 	}
 	return nil
