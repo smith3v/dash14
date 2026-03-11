@@ -12,11 +12,14 @@ import (
 // Models are registered here as they are introduced in subsequent tasks:
 //   - Task 5: Team, AppState
 //   - Task 6: User
-//   - Task 7: Game, GameSet
+//   - Task 7: Game, GameSet, AppState
 func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&Team{},
 		&User{},
+		&Game{},
+		&GameSet{},
+		&AppState{},
 	); err != nil {
 		return fmt.Errorf("storage: automigrate: %w", err)
 	}
