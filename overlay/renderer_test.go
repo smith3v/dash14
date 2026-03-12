@@ -24,13 +24,19 @@ func templateDir(t *testing.T) string {
 
 func TestRenderPlanned(t *testing.T) {
 	tmpDir := t.TempDir()
-	outPath := filepath.Join(tmpDir, "overlay.html")
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
 	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-logo")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-logo")
 
 	cfg := config.OverlayConfig{
 		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
 		OutputPath:          outPath,
+		LogoDir:             logoDir,
 	}
 
 	r := NewRenderer(cfg)
@@ -38,10 +44,10 @@ func TestRenderPlanned(t *testing.T) {
 	vm := PlannedViewModel{
 		HomeTeamName:       "Dynamo",
 		HomeTeamShortName:  "DYN",
-		HomeTeamLogoPath:   "",
+		HomeTeamLogoPath:   "home.png",
 		GuestTeamName:      "Aurora",
 		GuestTeamShortName: "AUR",
-		GuestTeamLogoPath:  "",
+		GuestTeamLogoPath:  "guest.png",
 	}
 
 	if err := r.RenderPlanned(vm); err != nil {
@@ -63,6 +69,8 @@ func TestRenderPlanned(t *testing.T) {
 		{"guest team name", "Aurora"},
 		{"home short name", "DYN"},
 		{"guest short name", "AUR"},
+		{"home logo src", `src="home.png"`},
+		{"guest logo src", `src="guest.png"`},
 		{"upcoming label", "Upcoming"},
 		{"doctype", "<!DOCTYPE html>"},
 	}
@@ -74,17 +82,26 @@ func TestRenderPlanned(t *testing.T) {
 			}
 		})
 	}
+
+	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-logo")
+	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-logo")
 }
 
 func TestRenderLive(t *testing.T) {
 	tmpDir := t.TempDir()
-	outPath := filepath.Join(tmpDir, "overlay.html")
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
 	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-live")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-live")
 
 	cfg := config.OverlayConfig{
 		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
 		OutputPath:          outPath,
+		LogoDir:             logoDir,
 	}
 
 	r := NewRenderer(cfg)
@@ -92,8 +109,10 @@ func TestRenderLive(t *testing.T) {
 	vm := LiveViewModel{
 		HomeTeamName:       "Dynamo",
 		HomeTeamShortName:  "DYN",
+		HomeTeamLogoPath:   "home.png",
 		GuestTeamName:      "Aurora",
 		GuestTeamShortName: "AUR",
+		GuestTeamLogoPath:  "guest.png",
 		HomeScore:          18,
 		GuestScore:         11,
 		HomeSetsWon:        2,
@@ -138,6 +157,9 @@ func TestRenderLive(t *testing.T) {
 			}
 		})
 	}
+
+	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-live")
+	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-live")
 }
 
 func TestRenderAtomicReplacement(t *testing.T) {
@@ -200,5 +222,26 @@ func TestRenderAtomicReplacement(t *testing.T) {
 			names[i] = e.Name()
 		}
 		t.Errorf("expected exactly 1 file in tmp dir, got %d: %v", len(entries), names)
+	}
+}
+
+func writeLogoFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write logo %q: %v", path, err)
+	}
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("content of %q = %q, want %q", path, string(data), want)
 	}
 }
