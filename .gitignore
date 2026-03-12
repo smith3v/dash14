@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+.DS_Store
 
 # Test binary, built with `go test -c`
 *.test
@@ -28,8 +29,8 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 
 # dash14 local runtime artifacts
 config.yaml
@@ -37,4 +38,5 @@ config.yaml
 *.db-shm
 *.db-wal
 out/
-var/logos/
+bin/
+var/

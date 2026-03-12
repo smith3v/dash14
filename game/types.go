@@ -39,7 +39,7 @@ type SetState struct {
 type ConfirmSetResult struct {
 	Game         GameState
 	NextSet      *SetState // nil if match is over (game needs to be finished)
-	PromptFinish bool      // true if a team won 3 sets, admin must confirm finish
+	PromptFinish bool      // true if match became finish-eligible, admin must confirm finish
 }
 
 // ConfirmGameResult is returned by ConfirmGameFinished.

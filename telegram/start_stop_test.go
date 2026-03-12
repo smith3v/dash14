@@ -376,3 +376,30 @@ func TestBroadcastSkipsUnsubscribed(t *testing.T) {
 		t.Errorf("expected 1 message sent (unsubscribed user skipped), got %d", got)
 	}
 }
+
+// TestBroadcastExceptSkipsExcluded verifies that BroadcastExcept does not send
+// to explicitly excluded users even when they are subscribed.
+func TestBroadcastExceptSkipsExcluded(t *testing.T) {
+	store := openTestStore(t)
+	eb := &errBot{failIDs: map[int64]bool{}}
+	b := newTestBot(t)
+	r := NewRouter(b, discardLogger(), eb, store.users, nil)
+	ctx := context.Background()
+
+	for _, id := range []int64{6001, 6002, 6003} {
+		if err := store.users.UpsertTelegramUser(id, ""); err != nil {
+			t.Fatalf("UpsertTelegramUser(%d): %v", id, err)
+		}
+	}
+
+	r.BroadcastExcept(ctx, "skip one", 6002)
+
+	if got := eb.SentCount(); got != 2 {
+		t.Fatalf("expected 2 sends with one excluded user, got %d", got)
+	}
+	for _, m := range eb.sent {
+		if m.ChatID == 6002 {
+			t.Fatalf("excluded user %d unexpectedly received a message", m.ChatID)
+		}
+	}
+}

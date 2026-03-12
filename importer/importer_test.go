@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,6 +60,36 @@ func TestCopyLogo_FileExistsWithStableName(t *testing.T) {
 	destPath := filepath.Join(logoDir, wantFilename)
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
 		t.Errorf("expected file %q to exist in logo directory, but it does not", destPath)
+	}
+}
+
+// TestCopyLogo_SourceEqualsDestination_NoTruncate verifies that when source
+// already points at the managed destination path, CopyLogo is a no-op and does
+// not truncate the file.
+func TestCopyLogo_SourceEqualsDestination_NoTruncate(t *testing.T) {
+	logoDir := t.TempDir()
+	srcPath := filepath.Join(logoDir, "same-team.png")
+	content := []byte("same-file-logo-content")
+
+	if err := os.WriteFile(srcPath, content, 0o644); err != nil {
+		t.Fatalf("write source logo: %v", err)
+	}
+
+	store := NewLogoStore(logoDir)
+	relPath, err := store.CopyLogo("same-team", srcPath)
+	if err != nil {
+		t.Fatalf("CopyLogo: unexpected error: %v", err)
+	}
+	if relPath != "same-team.png" {
+		t.Fatalf("CopyLogo returned %q, want %q", relPath, "same-team.png")
+	}
+
+	got, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Fatalf("read source logo after copy: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatalf("source file content changed: got %q, want %q", string(got), string(content))
 	}
 }
 

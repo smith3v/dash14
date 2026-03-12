@@ -2,6 +2,10 @@ package game
 
 import "fmt"
 
+const (
+	minSetsBeforeFinish = 4
+)
+
 // IsSetFinishable returns whether the given SetScore can be confirmed as
 // finished. It is the exported equivalent of the unexported isFinishable
 // helper used by the scoring layer.
@@ -63,10 +67,9 @@ func ConfirmSetFinished(g GameState, s SetState) (ConfirmSetResult, error) {
 		g.GuestSetsWon++
 	}
 
-	// If a team now has 3 sets won the match is ready to finish; do not
-	// create a next set — the caller must prompt the admin to confirm.
-	const setsToWin = 3
-	if g.HomeSetsWon >= setsToWin || g.GuestSetsWon >= setsToWin {
+	// We always play at least four sets. A fifth set is played only if the
+	// set score is 2-2 after four completed sets.
+	if IsGameFinishEligible(g) {
 		return ConfirmSetResult{
 			Game:         g,
 			NextSet:      nil,
@@ -98,9 +101,24 @@ func ConfirmSetFinished(g GameState, s SetState) (ConfirmSetResult, error) {
 	}, nil
 }
 
+// IsGameFinishEligible reports whether the match can be confirmed finished
+// under the competition rule:
+//   - at least four completed sets are required
+//   - if four sets are completed at 2-2, set 5 must be played
+func IsGameFinishEligible(g GameState) bool {
+	completedSets := g.HomeSetsWon + g.GuestSetsWon
+	if completedSets < minSetsBeforeFinish {
+		return false
+	}
+	if completedSets == minSetsBeforeFinish {
+		return !(g.HomeSetsWon == 2 && g.GuestSetsWon == 2)
+	}
+	return true
+}
+
 // ConfirmGameFinished marks the game as finished.
-// Returns an error if no team has 3 sets won yet, or if the game is already
-// finished.
+// Returns an error if the game has not met finish eligibility yet, or if the
+// game is already finished.
 func ConfirmGameFinished(g GameState) (ConfirmGameResult, error) {
 	if g.Status == "finished" {
 		return ConfirmGameResult{}, fmt.Errorf(
@@ -108,11 +126,10 @@ func ConfirmGameFinished(g GameState) (ConfirmGameResult, error) {
 		)
 	}
 
-	const setsToWin = 3
-	if g.HomeSetsWon < setsToWin && g.GuestSetsWon < setsToWin {
+	if !IsGameFinishEligible(g) {
 		return ConfirmGameResult{}, fmt.Errorf(
-			"game: ConfirmGameFinished: no team has won %d sets (home=%d, guest=%d)",
-			setsToWin, g.HomeSetsWon, g.GuestSetsWon,
+			"game: ConfirmGameFinished: not eligible yet (home=%d, guest=%d, completed=%d)",
+			g.HomeSetsWon, g.GuestSetsWon, g.HomeSetsWon+g.GuestSetsWon,
 		)
 	}
 
