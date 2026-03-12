@@ -79,8 +79,9 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 	})
 }
 
-// handlePlanText handles plain-text messages from users who have an active
-// plan state. Messages that arrive when no plan state exists are ignored.
+// handlePlanText handles non-command plan input for users who have an active
+// /plan session. Unknown bot commands are answered with the default help
+// message; plain text without an active plan state is ignored.
 //
 // This handler is registered with MatchTypePrefix and pattern "" so it
 // catches every non-command message. Command messages are intercepted by the
@@ -90,10 +91,13 @@ func (r *Router) handlePlanText(ctx context.Context, _ *bot.Bot, update *models.
 		return
 	}
 
-	// Ignore bot commands — they are handled by exact-match handlers.
+	// Exact-match handlers process known commands before this catch-all handler.
+	// Any bot command that still reaches this point is unknown and should get
+	// the default help response.
 	if update.Message.Text != "" && len(update.Message.Entities) > 0 {
 		for _, e := range update.Message.Entities {
 			if e.Type == models.MessageEntityTypeBotCommand && e.Offset == 0 {
+				r.handleUnknownCommand(ctx, update)
 				return
 			}
 		}
