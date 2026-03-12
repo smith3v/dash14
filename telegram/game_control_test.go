@@ -2,11 +2,13 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/smith3v/dash14/storage"
+	"gorm.io/gorm"
 )
 
 func makeGameMessageUpdate(userID, chatID int64, text string) *models.Update {
@@ -186,7 +188,7 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 }
 
-func TestGameControlSetFinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
+func TestGameControlSet3FinishCreatesSet4(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, _, renderer := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -207,6 +209,7 @@ func TestGameControlSetFinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	}
 	g.HomeSetsWon = 2
 	g.GuestSetsWon = 0
+	g.CurrentSetNumber = 3
 	if err := store.games.SaveGame(g); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}
@@ -214,6 +217,7 @@ func TestGameControlSetFinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetActiveSet: %v", err)
 	}
+	set.SetNumber = 3
 	set.HomeScore = 25
 	set.GuestScore = 10
 	if err := store.games.SaveSet(set); err != nil {
@@ -231,6 +235,76 @@ func TestGameControlSetFinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	}
 	if g.HomeSetsWon != 3 {
 		t.Fatalf("expected home sets won to become 3, got %d", g.HomeSetsWon)
+	}
+	if g.CurrentSetNumber != 4 {
+		t.Fatalf("expected game to continue to set 4, got set %d", g.CurrentSetNumber)
+	}
+	nextSet, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet after set finish: %v", err)
+	}
+	if nextSet.SetNumber != 4 {
+		t.Fatalf("expected next active set number 4, got %d", nextSet.SetNumber)
+	}
+	if len(renderer.live) == 0 {
+		t.Fatal("expected live overlay rendering after set finish")
+	}
+}
+
+func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, _, renderer := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 7305
+	const chatID int64 = 8305
+	store.createAdminUser(t, userID, "owner6")
+	game := createCurrentPlannedGame(t, store, userID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(userID, chatID, "/game"))
+	current, _ := store.games.GetGameByID(game.ID)
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start4", "game:start"))
+
+	g, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	g.HomeSetsWon = 3
+	g.GuestSetsWon = 0
+	g.CurrentSetNumber = 4
+	if err := store.games.SaveGame(g); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	set, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet: %v", err)
+	}
+	set.SetNumber = 4
+	set.HomeScore = 25
+	set.GuestScore = 10
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet: %v", err)
+	}
+
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish4", "game:set:finish"))
+
+	g, err = store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after set finish: %v", err)
+	}
+	if g.Status != storage.GameStatusInProgress {
+		t.Fatalf("expected game to remain in_progress, got %q", g.Status)
+	}
+	if g.HomeSetsWon != 4 {
+		t.Fatalf("expected home sets won to become 4, got %d", g.HomeSetsWon)
+	}
+	if g.CurrentSetNumber != 4 {
+		t.Fatalf("expected current set number to stay on set 4 for finish prompt, got %d", g.CurrentSetNumber)
+	}
+	_, err = store.games.GetActiveSet(game.ID)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected no active set after set 4 finish prompt, got err=%v", err)
 	}
 	if len(renderer.live) == 0 {
 		t.Fatal("expected live overlay rendering after set finish")

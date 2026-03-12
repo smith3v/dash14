@@ -342,7 +342,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 			{Text: "Is set finished?", CallbackData: "game:set:finish"},
 		})
 	}
-	if game.HomeSetsWon >= 3 || game.GuestSetsWon >= 3 {
+	if gamepkg.IsGameFinishEligible(toGameState(game)) {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Is game finished?", CallbackData: "game:game:finish"},
 		})

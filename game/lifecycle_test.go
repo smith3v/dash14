@@ -153,6 +153,31 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 			wantErr:          false,
 		},
 		{
+			name: "home wins set 3, still creates set 4",
+			game: GameState{
+				Status:           "in_progress",
+				HomeSide:         "left",
+				GuestSide:        "right",
+				CurrentSetNumber: 3,
+				HomeSetsWon:      2,
+				GuestSetsWon:     0,
+			},
+			set: SetState{
+				SetScore: SetScore{
+					HomeScore:  25,
+					GuestScore: 21,
+					SetNumber:  3,
+				},
+			},
+			wantNextSetNum:   4,
+			wantHomeSide:     "right",
+			wantGuestSide:    "left",
+			wantHomeSetsWon:  3,
+			wantGuestSetsWon: 0,
+			wantPromptFinish: false,
+			wantErr:          false,
+		},
+		{
 			name: "not finishable score returns error",
 			game: GameState{
 				Status:           "in_progress",
@@ -188,7 +213,7 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "set 4 creates set 5 with SideSwitchedInSet5 from game",
+			name: "set 4 at 2-2 creates set 5 with SideSwitchedInSet5 from game",
 			game: GameState{
 				Status:             "in_progress",
 				HomeSide:           "left",
@@ -200,17 +225,17 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 			},
 			set: SetState{
 				SetScore: SetScore{
-					HomeScore:  25,
-					GuestScore: 22,
+					HomeScore:  20,
+					GuestScore: 25,
 					SetNumber:  4,
 				},
 			},
 			wantNextSetNum:   5,
 			wantHomeSide:     "right",
 			wantGuestSide:    "left",
-			wantHomeSetsWon:  3,
-			wantGuestSetsWon: 1,
-			wantPromptFinish: true, // 3 sets won
+			wantHomeSetsWon:  2,
+			wantGuestSetsWon: 2,
+			wantPromptFinish: false,
 			wantErr:          false,
 		},
 	}
@@ -276,8 +301,8 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 	}
 }
 
-// TestConfirmSetFinished_PromptFinish verifies that when a team wins their
-// 3rd set, PromptFinish is true and NextSet is nil — the app does not
+// TestConfirmSetFinished_PromptFinish verifies that when set-finish rules make
+// the match finish-eligible, PromptFinish is true and NextSet is nil — the app does not
 // auto-finish the match.
 func TestConfirmSetFinished_PromptFinish(t *testing.T) {
 	tests := []struct {
@@ -288,23 +313,23 @@ func TestConfirmSetFinished_PromptFinish(t *testing.T) {
 		wantGuestSetsWon int
 	}{
 		{
-			name: "home team wins 3rd set",
+			name: "home team wins set 4 after already leading 3-0",
 			game: GameState{
 				Status:           "in_progress",
 				HomeSide:         "left",
 				GuestSide:        "right",
-				CurrentSetNumber: 3,
-				HomeSetsWon:      2,
+				CurrentSetNumber: 4,
+				HomeSetsWon:      3,
 				GuestSetsWon:     0,
 			},
 			set: SetState{
 				SetScore: SetScore{
 					HomeScore:  25,
 					GuestScore: 18,
-					SetNumber:  3,
+					SetNumber:  4,
 				},
 			},
-			wantHomeSetsWon:  3,
+			wantHomeSetsWon:  4,
 			wantGuestSetsWon: 0,
 		},
 		{
@@ -358,7 +383,7 @@ func TestConfirmSetFinished_PromptFinish(t *testing.T) {
 }
 
 // TestConfirmGameFinished verifies that ConfirmGameFinished sets status to
-// "finished" when a team has 3 sets won, and returns an error otherwise.
+// "finished" only when the game is finish-eligible under the set-count rules.
 func TestConfirmGameFinished(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -367,7 +392,7 @@ func TestConfirmGameFinished(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "home team has 3 sets — finishes successfully",
+			name: "home team has 3-1 after four completed sets — finishes successfully",
 			game: GameState{
 				Status:       "in_progress",
 				HomeSetsWon:  3,
@@ -377,7 +402,7 @@ func TestConfirmGameFinished(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "guest team has 3 sets — finishes successfully",
+			name: "guest team has 3-2 after five completed sets — finishes successfully",
 			game: GameState{
 				Status:       "in_progress",
 				HomeSetsWon:  2,
@@ -387,7 +412,16 @@ func TestConfirmGameFinished(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "no team has 3 sets — error returned",
+			name: "3-0 after three completed sets is not finish-eligible yet",
+			game: GameState{
+				Status:       "in_progress",
+				HomeSetsWon:  3,
+				GuestSetsWon: 0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "2-2 after four completed sets is not finish-eligible yet",
 			game: GameState{
 				Status:       "in_progress",
 				HomeSetsWon:  2,
@@ -526,6 +560,44 @@ func TestIsSetFinishable(t *testing.T) {
 			got := IsSetFinishable(tc.set)
 			if got != tc.want {
 				t.Errorf("IsSetFinishable(%+v) = %v, want %v", tc.set, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsGameFinishEligible(t *testing.T) {
+	tests := []struct {
+		name string
+		game GameState
+		want bool
+	}{
+		{
+			name: "3-0 after three sets is not eligible",
+			game: GameState{HomeSetsWon: 3, GuestSetsWon: 0},
+			want: false,
+		},
+		{
+			name: "3-1 after four sets is eligible",
+			game: GameState{HomeSetsWon: 3, GuestSetsWon: 1},
+			want: true,
+		},
+		{
+			name: "2-2 after four sets is not eligible",
+			game: GameState{HomeSetsWon: 2, GuestSetsWon: 2},
+			want: false,
+		},
+		{
+			name: "3-2 after five sets is eligible",
+			game: GameState{HomeSetsWon: 3, GuestSetsWon: 2},
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsGameFinishEligible(tc.game)
+			if got != tc.want {
+				t.Errorf("IsGameFinishEligible(%+v) = %v, want %v", tc.game, got, tc.want)
 			}
 		})
 	}
