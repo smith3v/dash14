@@ -286,7 +286,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	})
 
 	if strings.TrimSpace(broadcastText) != "" {
-		r.Broadcast(ctx, broadcastText)
+		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
 	}
 }
 

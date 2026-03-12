@@ -268,4 +268,10 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 	if !foundBroadcast {
 		t.Fatal("expected broadcast score update to subscribed user")
 	}
+
+	for _, m := range msgs {
+		if m.ChatID == adminID {
+			t.Fatalf("expected active admin %d to be excluded from broadcasts", adminID)
+		}
+	}
 }
