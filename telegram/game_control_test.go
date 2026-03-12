@@ -349,3 +349,69 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 		}
 	}
 }
+
+func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 7306
+	const chatID int64 = 8306
+	store.createAdminUser(t, userID, "owner7")
+	game := createCurrentPlannedGame(t, store, userID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(userID, chatID, "/game"))
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start5", "game:start"))
+
+	g, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after start: %v", err)
+	}
+	g.HomeSetsWon = 4
+	g.GuestSetsWon = 0
+	g.CurrentSetNumber = 4
+	if err := store.games.SaveGame(g); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+
+	set, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet: %v", err)
+	}
+	set.IsFinished = true
+	set.SetNumber = 4
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet: %v", err)
+	}
+
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-game-finish", "game:game:finish"))
+
+	g, err = store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after finish: %v", err)
+	}
+	if g.Status != storage.GameStatusFinished {
+		t.Fatalf("expected finished status, got %q", g.Status)
+	}
+
+	edited := fb.EditedMessages()
+	if len(edited) == 0 {
+		t.Fatal("expected edited control message after game finish")
+	}
+	last := edited[len(edited)-1]
+	if !strings.Contains(last.Text, "Game finished") {
+		t.Fatalf("expected finish confirmation text, got %q", last.Text)
+	}
+	kb, ok := last.ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("expected inline keyboard markup on edited message, got %T", last.ReplyMarkup)
+	}
+	if len(kb.InlineKeyboard) != 0 {
+		t.Fatalf("expected no controls after finish, got %d keyboard rows", len(kb.InlineKeyboard))
+	}
+}

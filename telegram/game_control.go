@@ -296,6 +296,20 @@ type controlView struct {
 }
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
+	if game.Status == storage.GameStatusFinished {
+		text := fmt.Sprintf(
+			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
+			game.HomeSetsWon,
+			game.GuestSetsWon,
+			homeName,
+			guestName,
+		)
+		return controlView{
+			Text:     text,
+			Keyboard: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{}},
+		}
+	}
+
 	homeScore := 0
 	guestScore := 0
 	finishable := false

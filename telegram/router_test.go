@@ -22,6 +22,7 @@ import (
 type FakeBot struct {
 	mu            sync.Mutex
 	sent          []sentMessage
+	edited        []editedMessage
 	nextMessageID int
 }
 
@@ -29,6 +30,14 @@ type FakeBot struct {
 type sentMessage struct {
 	MessageID   int
 	ChatID      int64
+	Text        string
+	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
+}
+
+// editedMessage captures the arguments of an EditMessageText call.
+type editedMessage struct {
+	ChatID      int64
+	MessageID   int
 	Text        string
 	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
 }
@@ -55,8 +64,18 @@ func (f *FakeBot) SendMessage(_ context.Context, params *bot.SendMessageParams) 
 }
 
 // EditMessageText records the call and returns a minimal *models.Message.
-func (f *FakeBot) EditMessageText(_ context.Context, _ *bot.EditMessageTextParams) (*models.Message, error) {
-	return &models.Message{ID: 1}, nil
+func (f *FakeBot) EditMessageText(_ context.Context, params *bot.EditMessageTextParams) (*models.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	chatID, _ := params.ChatID.(int64)
+	f.edited = append(f.edited, editedMessage{
+		ChatID:      chatID,
+		MessageID:   params.MessageID,
+		Text:        params.Text,
+		ReplyMarkup: params.ReplyMarkup,
+	})
+	return &models.Message{ID: params.MessageID}, nil
 }
 
 // AnswerCallbackQuery records the call and returns true.
@@ -70,6 +89,15 @@ func (f *FakeBot) SentMessages() []sentMessage {
 	defer f.mu.Unlock()
 	out := make([]sentMessage, len(f.sent))
 	copy(out, f.sent)
+	return out
+}
+
+// EditedMessages returns a snapshot of all messages edited via EditMessageText.
+func (f *FakeBot) EditedMessages() []editedMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]editedMessage, len(f.edited))
+	copy(out, f.edited)
 	return out
 }
 
@@ -267,6 +295,14 @@ func TestRouterFakeBotEditMessageText(t *testing.T) {
 	}
 	if msg == nil {
 		t.Fatal("EditMessageText: returned nil message")
+	}
+
+	edited := fb.EditedMessages()
+	if len(edited) != 1 {
+		t.Fatalf("expected 1 edited message, got %d", len(edited))
+	}
+	if edited[0].Text != "updated" {
+		t.Fatalf("expected edited text %q, got %q", "updated", edited[0].Text)
 	}
 }
 
