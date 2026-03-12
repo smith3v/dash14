@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,20 @@ func (s *LogoStore) CopyLogo(teamKey, sourcePath string) (string, error) {
 
 	if err := os.MkdirAll(s.logoDir, 0o750); err != nil {
 		return "", fmt.Errorf("importer: create logo directory %q: %w", s.logoDir, err)
+	}
+
+	srcInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("importer: stat source logo %q: %w", sourcePath, err)
+	}
+	destInfo, err := os.Stat(destPath)
+	if err == nil && os.SameFile(srcInfo, destInfo) {
+		// Source already matches the managed destination path; avoid opening the
+		// destination for write to prevent truncating the source file.
+		return destFilename, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("importer: stat dest logo %q: %w", destPath, err)
 	}
 
 	src, err := os.Open(sourcePath)
