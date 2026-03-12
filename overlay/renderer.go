@@ -1,8 +1,10 @@
 package overlay
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -25,6 +27,10 @@ func NewRenderer(cfg config.OverlayConfig) *Renderer {
 // RenderPlanned parses the planned template and renders it with vm to the
 // configured output path.
 func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+
 	tmpl, err := template.ParseFiles(r.cfg.PlannedTemplatePath)
 	if err != nil {
 		return fmt.Errorf("overlay: parse planned template: %w", err)
@@ -35,6 +41,10 @@ func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
 // RenderLive parses the live template and renders it with vm to the configured
 // output path.
 func (r *Renderer) RenderLive(vm LiveViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+
 	tmpl, err := template.ParseFiles(r.cfg.LiveTemplatePath)
 	if err != nil {
 		return fmt.Errorf("overlay: parse live template: %w", err)
@@ -75,6 +85,109 @@ func (r *Renderer) renderToOutput(tmpl *template.Template, data any) error {
 
 	if err = os.Rename(tmpName, r.cfg.OutputPath); err != nil {
 		return fmt.Errorf("overlay: rename temp file to output: %w", err)
+	}
+
+	ok = true
+	return nil
+}
+
+func (r *Renderer) publishLogos(homeLogoPath, guestLogoPath *string) error {
+	var err error
+	*homeLogoPath, err = r.publishLogo(*homeLogoPath)
+	if err != nil {
+		return err
+	}
+	*guestLogoPath, err = r.publishLogo(*guestLogoPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Renderer) publishLogo(filename string) (string, error) {
+	if filename == "" {
+		return "", nil
+	}
+
+	sourcePath := filepath.Join(r.cfg.LogoDir, filename)
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("overlay: logo source %q not found", sourcePath)
+		}
+		return "", fmt.Errorf("overlay: stat logo source %q: %w", sourcePath, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("overlay: logo source %q is a directory", sourcePath)
+	}
+
+	destPath := filepath.Join(filepath.Dir(r.cfg.OutputPath), filename)
+	same, err := sameFile(sourcePath, destPath)
+	if err != nil {
+		return "", err
+	}
+	if same {
+		return filename, nil
+	}
+
+	if err := copyFileAtomically(sourcePath, destPath); err != nil {
+		return "", err
+	}
+	return filename, nil
+}
+
+func sameFile(pathA, pathB string) (bool, error) {
+	infoA, err := os.Stat(pathA)
+	if err != nil {
+		return false, fmt.Errorf("overlay: stat %q: %w", pathA, err)
+	}
+	infoB, err := os.Stat(pathB)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("overlay: stat %q: %w", pathB, err)
+	}
+	return os.SameFile(infoA, infoB), nil
+}
+
+func copyFileAtomically(sourcePath, destPath string) error {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("overlay: create logo output directory: %w", err)
+	}
+
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("overlay: open logo source %q: %w", sourcePath, err)
+	}
+	defer source.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(destPath), "logo-*.tmp")
+	if err != nil {
+		return fmt.Errorf("overlay: create temp logo file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := io.Copy(tmp, source); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("overlay: copy logo to temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("overlay: chmod temp logo file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("overlay: close temp logo file: %w", err)
+	}
+	if err := os.Rename(tmpName, destPath); err != nil {
+		return fmt.Errorf("overlay: rename temp logo file: %w", err)
 	}
 
 	ok = true
