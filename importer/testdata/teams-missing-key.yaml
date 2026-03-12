@@ -1,0 +1,13 @@
+- key: dynamo
+  name: Dynamo Moscow
+  short_name: DYN
+  logo: logos/dynamo.png
+  aliases:
+    - Dynamo
+
+- name: Fakel Novy Urengoy
+  short_name: FAK
+  logo: logos/fakel.png
+  aliases:
+    - Fakel
+  # 'key' is intentionally omitted to trigger a required-field error

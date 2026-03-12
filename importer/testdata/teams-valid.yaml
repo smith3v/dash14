@@ -1,0 +1,17 @@
+- key: lokomotiv
+  name: Lokomotiv Novosibirsk
+  short_name: LOK
+  logo: logos/lokomotiv.png
+  aliases:
+    - Loko
+    - Lokomotiv
+  country: Russia         # unknown field – must be silently ignored
+  founded: 1977           # unknown field – must be silently ignored
+
+- key: zenit
+  name: Zenit Saint Petersburg
+  short_name: ZEN
+  logo: logos/zenit.png
+  aliases:
+    - Zenit SPb
+  stadium: Sibur Arena    # unknown field – must be silently ignored

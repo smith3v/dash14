@@ -1,0 +1,40 @@
+# dash14 configuration example
+# Copy this file to config.yaml and fill in your values.
+# config.yaml is git-ignored; never commit real tokens.
+
+telegram:
+  # token is the Telegram bot token issued by BotFather.
+  # Required for runtime mode; not needed for --import mode.
+  token: "123456789:AABBCCDDEEFFaabbccddeeff-example-token"
+
+sqlite:
+  # path is the filesystem path to the SQLite database file.
+  # The file will be created automatically if it does not exist.
+  # Required for both runtime and import mode.
+  path: "var/dash14.db"
+
+overlay:
+  # planned_template_path is the HTML template rendered when a game is in the
+  # "planned" state (teams announced, match not yet started).
+  planned_template_path: "templates/planned.html"
+
+  # live_template_path is the HTML template rendered while a game is in
+  # progress.
+  live_template_path: "templates/live.html"
+
+  # output_path is where the rendered overlay HTML file is written.
+  # Point your OBS Browser Source at this file.
+  output_path: "out/overlay.html"
+
+  # logo_dir is the managed directory where team logo files are stored.
+  # The importer copies logos here and the overlay references them by path.
+  logo_dir: "var/logos"
+
+logging:
+  # level sets the minimum log level. Accepted values: debug, info, warn, error.
+  # Defaults to "info" when omitted.
+  level: "info"
+
+  # file_path is an optional path to a log file.
+  # When omitted (or empty) logs are written to stderr.
+  file_path: "var/dash14.log"

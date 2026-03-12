@@ -30,3 +30,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# dash14 local runtime artifacts
+config.yaml
+*.db
+*.db-shm
+*.db-wal
+out/
+var/logos/
