@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 // TestOpen verifies that Open succeeds for a fresh database placed inside a

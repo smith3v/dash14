@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
 

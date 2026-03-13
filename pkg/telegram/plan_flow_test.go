@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/smith3v/dash14/overlay"
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/overlay"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 // planTestStore bundles a raw DB, a UserRepository, and a TeamRepository for
