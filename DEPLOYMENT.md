@@ -78,9 +78,9 @@ Edit `deploy/config/config.container.yaml` using [deploy/config/config.container
 
 These paths match the current image and compose wiring:
 
-- `./deploy/runtime/data` -> `/data`
-- `./deploy/runtime/out` -> `/out`
-- `./deploy/runtime/logs` -> `/logs`
+- `./runtime/data` -> `/data`
+- `./runtime/out` -> `/out`
+- `./runtime/logs` -> `/logs`
 - templates are baked into the image at `/app/templates`
 
 The app itself is not an HTTP server. It only writes files to `/out`, and `nginx` serves those files.
@@ -104,7 +104,7 @@ service: http://nginx:80
 Create the runtime directories once:
 
 ```bash
-mkdir -p deploy/runtime/data deploy/runtime/out deploy/runtime/logs
+mkdir -p runtime/data runtime/out runtime/logs
 ```
 
 If you want to deploy a published release image instead of building locally, edit [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml) and replace the `app` service `build:` section with an explicit image reference such as:
@@ -154,15 +154,15 @@ docker compose run --rm \
   --import /import/teams.yaml
 ```
 
-If the import YAML references logo files, keep those files inside the mounted `teams/` directory so the container can read them. Imported logos are copied into `/data/logos`, which persists on the host under `deploy/runtime/data/logos`.
+If the import YAML references logo files, keep those files inside the mounted `teams/` directory so the container can read them. Imported logos are copied into `/data/logos`, which persists on the host under `runtime/data/logos`.
 
 ## Persistence And Backups
 
 Back up these paths on the NAS:
 
-- `deploy/runtime/data/dash14.db` for SQLite state
-- `deploy/runtime/data/logos/` for imported team logos
-- `deploy/runtime/logs/` if you want to retain logs
+- `runtime/data/dash14.db` for SQLite state
+- `runtime/data/logos/` for imported team logos
+- `runtime/logs/` if you want to retain logs
 - `deploy/cloudflared/credentials.json` and `deploy/cloudflared/config.yml` for tunnel access
 
 If you move the deployment to another machine, those files are the state you need to bring with it.

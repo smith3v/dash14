@@ -11,7 +11,7 @@ sqlite:
   # path is the filesystem path to the SQLite database file.
   # The file will be created automatically if it does not exist.
   # Required for both runtime and import mode.
-  path: "var/dash14.db"
+  path: "runtime/data/dash14.db"
 
 overlay:
   # planned_template_path is the HTML template rendered when a game is in the
@@ -24,11 +24,11 @@ overlay:
 
   # output_path is where the rendered overlay HTML file is written.
   # Point your OBS Browser Source at this file.
-  output_path: "out/overlay.html"
+  output_path: "runtime/out/overlay.html"
 
   # logo_dir is the managed directory where team logo files are stored.
   # The importer copies logos here and the overlay references them by path.
-  logo_dir: "var/logos"
+  logo_dir: "runtime/data/logos"
 
 logging:
   # level sets the minimum log level. Accepted values: debug, info, warn, error.
@@ -37,4 +37,4 @@ logging:
 
   # file_path is an optional path to a log file.
   # When omitted (or empty) logs are written to stderr.
-  file_path: "var/dash14.log"
+  file_path: "runtime/logs/dash14.log"

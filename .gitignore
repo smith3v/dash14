@@ -36,7 +36,7 @@ go.work.sum
 config.yaml
 deploy/config/config.container.yaml
 deploy/cloudflared/config.yml
-deploy/runtime/
+runtime/
 .gocache/
 .gomodcache/
 *.db
