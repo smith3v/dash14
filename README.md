@@ -61,6 +61,18 @@ Important: current template files in this repository are:
 
 So update overlay template paths accordingly.
 
+## Container Deployment Contract
+
+The planned NAS deployment keeps the current runtime model:
+
+- `dash14` reads a mounted YAML config file.
+- Template files are baked into the app image.
+- SQLite, rendered overlay output, copied logos, and logs live on mounted writable storage.
+- `nginx` serves the generated overlay files.
+- Cloudflare Tunnel proxies `nginx`, not the app process directly.
+
+For image builds, Apple Silicon Docker hosts map to `linux/arm64`. Intel Synology NAS targets map to `linux/amd64`.
+
 ### Minimal working config example
 
 ```yaml

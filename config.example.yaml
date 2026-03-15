@@ -16,11 +16,11 @@ sqlite:
 overlay:
   # planned_template_path is the HTML template rendered when a game is in the
   # "planned" state (teams announced, match not yet started).
-  planned_template_path: "templates/planned.html"
+  planned_template_path: "templates/planned.html.tmpl"
 
   # live_template_path is the HTML template rendered while a game is in
   # progress.
-  live_template_path: "templates/live.html"
+  live_template_path: "templates/live.html.tmpl"
 
   # output_path is where the rendered overlay HTML file is written.
   # Point your OBS Browser Source at this file.
