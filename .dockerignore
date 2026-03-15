@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+bin
+coverage.*
+docs
+out
+var
+*.db
+*.db-shm
+*.db-wal
+*.out
+*.test
+.DS_Store
+config.yaml
