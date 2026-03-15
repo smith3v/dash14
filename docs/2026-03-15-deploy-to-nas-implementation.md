@@ -22,7 +22,7 @@
 ### Task 1: Define the container runtime contract
 
 **Prompt:**
-1. Read [`app/runtime.go`](/Users/neuron/dev/dash14/app/runtime.go), [`config/config.go`](/Users/neuron/dev/dash14/config/config.go), [`config/load.go`](/Users/neuron/dev/dash14/config/load.go), and [`README.md`](/Users/neuron/dev/dash14/README.md) to confirm which files and directories must exist at runtime: config YAML, SQLite DB path, overlay output path, logo directory, template files, and optional log path.
+1. Read `app/runtime.go`, `config/config.go`, `config/load.go`, and `README.md` to confirm which files and directories must exist at runtime: config YAML, SQLite DB path, overlay output path, logo directory, template files, and optional log path.
 2. Write a short deployment contract section at the top of the implementation branch notes or PR description. State the exact container assumptions:
    - the app reads a mounted config file, not environment variables;
    - templates are baked into the image;
@@ -38,7 +38,7 @@
 ### Task 2: Add the application container image
 
 **Prompt:**
-1. Create [Dockerfile](/Users/neuron/dev/dash14/Dockerfile) and [.dockerignore](/Users/neuron/dev/dash14/.dockerignore).
+1. Create `Dockerfile` and `.dockerignore`.
 2. Use a multi-stage build:
    - builder stage compiles `./cmd/dash14` to a static-ish Linux binary;
    - runtime stage contains the binary, `templates/`, and a non-root user;
@@ -55,7 +55,7 @@
 ### Task 3: Add `nginx` static serving for the overlay
 
 **Prompt:**
-1. Create [deploy/nginx/default.conf](/Users/neuron/dev/dash14/deploy/nginx/default.conf).
+1. Create `deploy/nginx/default.conf`.
 2. Serve the shared overlay output directory from `nginx`:
    - `/` should return the generated overlay HTML file or directory index behavior chosen explicitly;
    - logo assets copied next to the overlay output must be reachable by relative paths;
@@ -71,10 +71,10 @@
 
 **Prompt:**
 1. Create:
-   - [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml)
-   - [deploy/cloudflared/config.yml.example](/Users/neuron/dev/dash14/deploy/cloudflared/config.yml.example)
-   - [deploy/config/config.container.example.yaml](/Users/neuron/dev/dash14/deploy/config/config.container.example.yaml)
-   - optionally [deploy/.env.example](/Users/neuron/dev/dash14/deploy/.env.example) if variable substitution materially reduces duplication.
+   - `docker-compose.yml`
+   - `deploy/cloudflared/config.yml.example`
+   - `deploy/config/config.container.example.yaml`
+   - optionally `deploy/.env.example` if variable substitution materially reduces duplication.
 2. Compose must define exactly three services:
    - `app`: built from the local Dockerfile or image reference, mounts config and writable data dirs;
    - `nginx`: uses the shared overlay output volume and custom config;
@@ -97,7 +97,7 @@
 ### Task 5: Document deployment setup and operational flow
 
 **Prompt:**
-1. Update [README.md](/Users/neuron/dev/dash14/README.md) with a deployment section for NAS/container usage.
+1. Update `README.md` with a deployment section for NAS/container usage.
 2. Document:
    - required files to copy and edit;
    - how to prepare `config.yaml` for container paths;
@@ -114,7 +114,7 @@
 ### Task 6: Add release image build workflow for git tags
 
 **Prompt:**
-1. Create [.github/workflows/release-images.yml](/Users/neuron/dev/dash14/.github/workflows/release-images.yml).
+1. Create `.github/workflows/release-images.yml`.
 2. Trigger the workflow on pushed tags matching a clear release pattern such as `v*`.
 3. Build and push a multi-platform image for:
    - `linux/amd64`
@@ -127,7 +127,7 @@
    - `docker/metadata-action`
    - `docker/build-push-action`
 5. Publish to GHCR under the current repo namespace, with tags for the git tag and optionally `latest` only on stable tags if that choice is made explicitly.
-6. Keep the existing [tests.yml](/Users/neuron/dev/dash14/.github/workflows/tests.yml) unchanged unless a small refactor is necessary to avoid duplication.
+6. Keep the existing `.github/workflows/tests.yml` unchanged unless a small refactor is necessary to avoid duplication.
 7. Commit with subject `ci: build release images on tags`.
 
 ---
@@ -135,7 +135,7 @@
 ### Task 7: Add deployment-oriented verification steps
 
 **Prompt:**
-1. Add a short verification section to [README.md](/Users/neuron/dev/dash14/README.md) or a dedicated deploy doc that lists the exact checks to run after bringing the stack up:
+1. Add a short verification section to `README.md` or a dedicated deploy doc that lists the exact checks to run after bringing the stack up:
    - `docker compose ps`
    - `docker compose logs app`
    - `docker compose logs nginx`
@@ -156,12 +156,12 @@
 
 **Prompt:**
 1. Do a final pass across:
-   - [Dockerfile](/Users/neuron/dev/dash14/Dockerfile)
-   - [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml)
-   - [deploy/nginx/default.conf](/Users/neuron/dev/dash14/deploy/nginx/default.conf)
-   - [deploy/cloudflared/config.yml.example](/Users/neuron/dev/dash14/deploy/cloudflared/config.yml.example)
-   - [.github/workflows/release-images.yml](/Users/neuron/dev/dash14/.github/workflows/release-images.yml)
-   - [README.md](/Users/neuron/dev/dash14/README.md)
+   - `Dockerfile`
+   - `docker-compose.yml`
+   - `deploy/nginx/default.conf`
+   - `deploy/cloudflared/config.yml.example`
+   - `.github/workflows/release-images.yml`
+   - `README.md`
 2. Remove avoidable complexity:
    - no second app container;
    - no embedded reverse proxy in the app image;

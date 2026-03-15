@@ -83,7 +83,7 @@ logging:
 
 ## Deployment
 
-For Docker Compose, `nginx`, and Cloudflare Tunnel setup, see [DEPLOYMENT.md](/Users/neuron/dev/dash14/DEPLOYMENT.md).
+For Docker Compose, `nginx`, and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
 
 ## Team Import File Format
 

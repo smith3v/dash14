@@ -6,7 +6,7 @@
 - `nginx` serving the generated overlay files
 - `cloudflared` publishing the `nginx` endpoint on your domain
 
-The stack definition lives in [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml).
+The stack definition lives in `docker-compose.yml`.
 
 By default, the compose file builds the app image from the local checkout. Release images published by GitHub Actions are pushed to:
 
@@ -74,7 +74,7 @@ If you already have an existing tunnel, you only need the matching credentials J
 
 ## App Config
 
-Edit `deploy/config/config.container.yaml` using [deploy/config/config.container.example.yaml](/Users/neuron/dev/dash14/deploy/config/config.container.example.yaml) as the template for the container layout used by the compose stack.
+Edit `deploy/config/config.container.yaml` using `deploy/config/config.container.example.yaml` as the template for the container layout used by the compose stack.
 
 These paths match the current image and compose wiring:
 
@@ -99,6 +99,14 @@ The tunnel should continue to point to:
 service: http://nginx:80
 ```
 
+Create the Cloudflare DNS route for that hostname:
+
+```bash
+cloudflared tunnel route dns <tunnel-id> <overlay.example.com>
+```
+
+Replace `<tunnel-id>` and `<overlay.example.com>` with the values configured in `deploy/cloudflared/config.yml`.
+
 ## Start The Stack
 
 Create the runtime directories once:
@@ -107,7 +115,7 @@ Create the runtime directories once:
 mkdir -p runtime/data runtime/out runtime/logs
 ```
 
-If you want to deploy a published release image instead of building locally, edit [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml) and replace the `app` service `build:` section with an explicit image reference such as:
+If you want to deploy a published release image instead of building locally, edit `docker-compose.yml` and replace the `app` service `build:` section with an explicit image reference such as:
 
 ```yaml
 image: ghcr.io/smith3v/dash14:v1.2.3
@@ -148,13 +156,14 @@ To import teams and logos with the containerized app, mount the source YAML and 
 
 ```bash
 docker compose run --rm \
-  -v "$PWD/teams:/import:ro" \
+  -w /workspace \
+  -v "$PWD:/workspace:ro" \
   app \
   --config /config/config.yaml \
-  --import /import/teams.yaml
+  --import /workspace/teams/teams.yaml
 ```
 
-If the import YAML references logo files, keep those files inside the mounted `teams/` directory so the container can read them. Imported logos are copied into `/data/logos`, which persists on the host under `runtime/data/logos`.
+Imported logos are copied into `/data/logos`, which persists on the host under `runtime/data/logos`.
 
 ## Persistence And Backups
 
