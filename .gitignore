@@ -37,6 +37,8 @@ config.yaml
 deploy/config/config.container.yaml
 deploy/cloudflared/config.yml
 deploy/runtime/
+.gocache/
+.gomodcache/
 *.db
 *.db-shm
 *.db-wal

@@ -8,6 +8,15 @@
 
 The stack definition lives in [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml).
 
+By default, the compose file builds the app image from the local checkout. Release images published by GitHub Actions are pushed to:
+
+- `ghcr.io/smith3v/dash14:<git-tag>`
+
+Examples:
+
+- `ghcr.io/smith3v/dash14:v0.1.0`
+- `ghcr.io/smith3v/dash14:v1.2.3`
+
 ## Runtime Contract
 
 - `dash14` reads a mounted YAML config file.
@@ -98,6 +107,12 @@ Create the runtime directories once:
 mkdir -p deploy/runtime/data deploy/runtime/out deploy/runtime/logs
 ```
 
+If you want to deploy a published release image instead of building locally, edit [docker-compose.yml](/Users/neuron/dev/dash14/docker-compose.yml) and replace the `app` service `build:` section with an explicit image reference such as:
+
+```yaml
+image: ghcr.io/smith3v/dash14:v1.2.3
+```
+
 Then start the deployment:
 
 ```bash
@@ -105,6 +120,27 @@ docker compose up -d
 ```
 
 `nginx` serves the generated overlay on the local compose endpoint at `http://127.0.0.1:8080/`, and Cloudflare Tunnel publishes that through the configured hostname.
+
+## Verification
+
+After bringing the stack up, run:
+
+```bash
+docker compose ps
+docker compose logs app
+docker compose logs nginx
+docker compose logs cloudflared
+curl http://127.0.0.1:8080/
+```
+
+For local validation of the deployment assets before rollout, run:
+
+```bash
+go test ./...
+docker build -t dash14:dev .
+docker compose config
+docker run --rm -v "$PWD/deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" nginx:stable nginx -t
+```
 
 ## Team Import In Containers
 
