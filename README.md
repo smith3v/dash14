@@ -81,6 +81,10 @@ logging:
   file_path: "var/dash14.log"
 ```
 
+## Deployment
+
+For Docker Compose, `nginx`, and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
+
 ## Team Import File Format
 
 Use a YAML list of team records.
