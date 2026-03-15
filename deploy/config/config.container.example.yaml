@@ -1,0 +1,15 @@
+telegram:
+  token: "123456789:AABBCCDDEEFFaabbccddeeff-example-token"
+
+sqlite:
+  path: "/data/dash14.db"
+
+overlay:
+  planned_template_path: "/app/templates/planned.html.tmpl"
+  live_template_path: "/app/templates/live.html.tmpl"
+  output_path: "/out/overlay.html"
+  logo_dir: "/data/logos"
+
+logging:
+  level: "info"
+  file_path: "/logs/dash14.log"

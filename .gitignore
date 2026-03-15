@@ -34,6 +34,7 @@ go.work.sum
 
 # dash14 local runtime artifacts
 config.yaml
+deploy/config/config.container.yaml
 *.db
 *.db-shm
 *.db-wal

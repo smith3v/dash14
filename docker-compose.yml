@@ -1,0 +1,35 @@
+services:
+  app:
+    build:
+      context: .
+    image: dash14:local
+    restart: unless-stopped
+    volumes:
+      - ./deploy/config/config.container.yaml:/config/config.yaml:ro
+      - ./deploy/runtime/data:/data
+      - ./deploy/runtime/out:/out
+      - ./deploy/runtime/logs:/logs
+
+  nginx:
+    image: nginx:stable
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/runtime/out:/usr/share/nginx/html:ro
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    command:
+      - tunnel
+      - --config
+      - /etc/cloudflared/config.yml
+      - run
+    volumes:
+      - ./deploy/cloudflared:/etc/cloudflared:ro
