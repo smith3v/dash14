@@ -65,7 +65,7 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: previousAdminID,
-			Text:   fmt.Sprintf("Game control was transferred to admin %s.", newAdminLabel),
+			Text:   fmt.Sprintf("Game control was transferred to %s.", newAdminLabel),
 		})
 	}
 	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{

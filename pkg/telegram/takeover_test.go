@@ -44,7 +44,7 @@ func TestTakeoverSuccess(t *testing.T) {
 	var ownerNotified bool
 	var newAdminNotified bool
 	for _, m := range msgs {
-		if m.ChatID == ownerID && m.Text == "Game control was transferred to admin @newowner." {
+		if m.ChatID == ownerID && m.Text == "Game control was transferred to @newowner." {
 			ownerNotified = true
 		}
 		if m.ChatID == chatID && strings.Contains(m.Text, "Run /game") {
@@ -84,7 +84,7 @@ func TestTakeoverFallsBackToDisplayName(t *testing.T) {
 	r.handleTakeover(ctx, nil, makeTextUpdate(newAdminID, chatID, "/takeover"))
 
 	for _, m := range fb.SentMessages() {
-		if m.ChatID == ownerID && m.Text == "Game control was transferred to admin Alex Admin." {
+		if m.ChatID == ownerID && m.Text == "Game control was transferred to Alex Admin." {
 			return
 		}
 	}
