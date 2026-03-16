@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`dash14` is a local Go application for managing a volleyball match scoreboard overlay. It runs on the streaming laptop alongside OBS, persists state in SQLite, serves an HTML overlay over a local HTTP server, and exposes match control through a Telegram bot.
+`dash14` is a local Go application for managing a volleyball match scoreboard overlay. It runs on the streaming laptop alongside OBS, persists state in SQLite, renders an HTML overlay file for OBS, and exposes match control through a Telegram bot.
 
 ## Key Design Documents
 
@@ -21,13 +21,13 @@ dash14 --config config.yaml --import teams.yaml  # import teams and exit
 
 | Package     | Responsibility                                      |
 |-------------|-----------------------------------------------------|
-| `config`    | YAML loading and validation                         |
-| `logging`   | Logger construction and shared logging setup        |
-| `storage`   | GORM models, migrations, and persistence access     |
-| `game`      | Match rules, state transitions, and scoring logic   |
-| `telegram`  | Bot handlers, admin UI, authorization, broadcasts   |
-| `overlay`   | Template loading, HTTP handlers, overlay behavior   |
-| `importer`  | YAML team import and logo file management           |
+| `pkg/config`   | YAML loading and validation                      |
+| `pkg/logging`  | Logger construction and shared logging setup     |
+| `pkg/storage`  | GORM models, migrations, and persistence access  |
+| `pkg/game`     | Match rules, state transitions, and scoring logic|
+| `pkg/telegram` | Bot handlers, admin UI, authorization, broadcasts|
+| `pkg/overlay`  | Template loading and overlay rendering behavior  |
+| `pkg/importer` | YAML team import and logo file management        |
 
 ## Core Entities (SQLite)
 
@@ -44,10 +44,10 @@ dash14 --config config.yaml --import teams.yaml  # import teams and exit
 - Set 5: first to 15 points, lead by ≥ 2; sides switch when either team reaches 8 (applied at most once)
 - App never auto-finishes a set or match — admin confirmation required
 
-## Overlay Endpoints
+## Overlay Output
 
-- `GET /overlay` — current overlay page for OBS (planned or live template)
-- `GET /api/overlay` — current overlay state as JSON
+- The runtime writes the current overlay HTML to the configured output file.
+- In container deployments, `nginx` serves the generated files from `runtime/out`.
 
 ## Commands
 

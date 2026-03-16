@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/smith3v/dash14/config"
-	"github.com/smith3v/dash14/importer"
-	"github.com/smith3v/dash14/logging"
-	"github.com/smith3v/dash14/overlay"
-	"github.com/smith3v/dash14/storage"
-	"github.com/smith3v/dash14/telegram"
+	"github.com/smith3v/dash14/pkg/config"
+	"github.com/smith3v/dash14/pkg/importer"
+	"github.com/smith3v/dash14/pkg/logging"
+	"github.com/smith3v/dash14/pkg/overlay"
+	"github.com/smith3v/dash14/pkg/storage"
+	"github.com/smith3v/dash14/pkg/telegram"
 	"gorm.io/gorm"
 )
 

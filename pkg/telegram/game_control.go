@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	gamepkg "github.com/smith3v/dash14/game"
-	"github.com/smith3v/dash14/overlay"
-	"github.com/smith3v/dash14/storage"
+	game2 "github.com/smith3v/dash14/pkg/game"
+	"github.com/smith3v/dash14/pkg/overlay"
+	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
 
@@ -137,7 +137,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if game.Status != storage.GameStatusPlanned {
 			return
 		}
-		gState, setState, err := gamepkg.StartPlannedGame(toGameState(game))
+		gState, setState, err := game2.StartPlannedGame(toGameState(game))
 		if err != nil {
 			return
 		}
@@ -162,22 +162,22 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if game.Status != storage.GameStatusInProgress || activeSet == nil {
 			return
 		}
-		score := gamepkg.SetScore{
+		score := game2.SetScore{
 			HomeScore:          activeSet.HomeScore,
 			GuestScore:         activeSet.GuestScore,
 			SetNumber:          activeSet.SetNumber,
 			SideSwitchedInSet5: game.SideSwitchedInSet5,
 		}
-		var result gamepkg.ScoreResult
+		var result game2.ScoreResult
 		switch data {
 		case "game:home:+1":
-			result = gamepkg.IncrementHome(score)
+			result = game2.IncrementHome(score)
 		case "game:home:-1":
-			result = gamepkg.DecrementHome(score)
+			result = game2.DecrementHome(score)
 		case "game:guest:+1":
-			result = gamepkg.IncrementGuest(score)
+			result = game2.IncrementGuest(score)
 		case "game:guest:-1":
-			result = gamepkg.DecrementGuest(score)
+			result = game2.DecrementGuest(score)
 		}
 
 		activeSet.HomeScore = result.Set.HomeScore
@@ -199,8 +199,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if game.Status != storage.GameStatusInProgress || activeSet == nil {
 			return
 		}
-		setState := gamepkg.SetState{
-			SetScore: gamepkg.SetScore{
+		setState := game2.SetState{
+			SetScore: game2.SetScore{
 				HomeScore:          activeSet.HomeScore,
 				GuestScore:         activeSet.GuestScore,
 				SetNumber:          activeSet.SetNumber,
@@ -208,7 +208,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			},
 			IsFinished: activeSet.IsFinished,
 		}
-		res, err := gamepkg.ConfirmSetFinished(toGameState(game), setState)
+		res, err := game2.ConfirmSetFinished(toGameState(game), setState)
 		if err != nil {
 			return
 		}
@@ -248,7 +248,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		)
 
 	case "game:game:finish":
-		res, err := gamepkg.ConfirmGameFinished(toGameState(game))
+		res, err := game2.ConfirmGameFinished(toGameState(game))
 		if err != nil {
 			return
 		}
@@ -262,7 +262,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		broadcastText = fmt.Sprintf("Game finished: %s vs %s", home.Name, guest.Name)
 
 	case "game:reverse":
-		res := gamepkg.ReverseOverlaySides(toGameState(game))
+		res := game2.ReverseOverlaySides(toGameState(game))
 		applyGameState(game, res.Game)
 		if err := r.games.SaveGame(game); err != nil {
 			return
@@ -316,7 +316,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	if activeSet != nil {
 		homeScore = activeSet.HomeScore
 		guestScore = activeSet.GuestScore
-		finishable = gamepkg.IsSetFinishable(gamepkg.SetScore{
+		finishable = game2.IsSetFinishable(game2.SetScore{
 			HomeScore:          activeSet.HomeScore,
 			GuestScore:         activeSet.GuestScore,
 			SetNumber:          activeSet.SetNumber,
@@ -356,7 +356,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 			{Text: "Is set finished?", CallbackData: "game:set:finish"},
 		})
 	}
-	if gamepkg.IsGameFinishEligible(toGameState(game)) {
+	if game2.IsGameFinishEligible(toGameState(game)) {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Is game finished?", CallbackData: "game:game:finish"},
 		})
@@ -400,8 +400,8 @@ func (r *Router) loadControlContext() (*storage.Game, *storage.Team, *storage.Te
 	return game, home, guest, activeSet, nil
 }
 
-func toGameState(g *storage.Game) gamepkg.GameState {
-	return gamepkg.GameState{
+func toGameState(g *storage.Game) game2.GameState {
+	return game2.GameState{
 		HomeTeamID:         g.HomeTeamID,
 		GuestTeamID:        g.GuestTeamID,
 		HomeSide:           g.HomeTeamSide,
@@ -414,7 +414,7 @@ func toGameState(g *storage.Game) gamepkg.GameState {
 	}
 }
 
-func applyGameState(dst *storage.Game, src gamepkg.GameState) {
+func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.HomeTeamSide = src.HomeSide
 	dst.GuestTeamSide = src.GuestSide
 	dst.HomeSetsWon = src.HomeSetsWon

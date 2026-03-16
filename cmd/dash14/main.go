@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/smith3v/dash14/app"
+	"github.com/smith3v/dash14/pkg/app"
 )
 
 func main() {

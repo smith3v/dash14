@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 )
 
 // New builds a *slog.Logger using cfg.

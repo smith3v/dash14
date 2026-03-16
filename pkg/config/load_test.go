@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 )
 
 // writeTemp writes content to a temporary file and returns its path.
@@ -175,7 +175,7 @@ func TestValidateRuntime(t *testing.T) {
 		name        string
 		content     string
 		wantErr     bool
-		wantErrSubs []string // substrings expected in the error message
+		wantErrSubs []string
 	}{
 		{
 			name:    "valid: all required fields present",
@@ -228,10 +228,8 @@ telegram:
 						t.Errorf("error %q does not contain %q", err.Error(), sub)
 					}
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("ValidateRuntime() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Fatalf("ValidateRuntime() unexpected error: %v", err)
 			}
 		})
 	}
@@ -293,10 +291,8 @@ telegram:
 						t.Errorf("error %q does not contain %q", err.Error(), sub)
 					}
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("ValidateImport() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Fatalf("ValidateImport() unexpected error: %v", err)
 			}
 		})
 	}
@@ -322,7 +318,6 @@ sqlite:
 		t.Errorf("ValidateImport() returned error for config without telegram token: %v", err)
 	}
 
-	// Verify the same config fails runtime validation.
 	if err := cfg.ValidateRuntime(); err == nil {
 		t.Error("ValidateRuntime() expected error for config without telegram token, got nil")
 	}

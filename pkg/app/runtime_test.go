@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/smith3v/dash14/config"
-	"github.com/smith3v/dash14/storage"
-	"github.com/smith3v/dash14/telegram"
+	"github.com/smith3v/dash14/pkg/config"
+	"github.com/smith3v/dash14/pkg/storage"
+	"github.com/smith3v/dash14/pkg/telegram"
 )
 
 func TestRunWithDepsImportModeExitsAfterImport(t *testing.T) {

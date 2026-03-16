@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
 

@@ -22,7 +22,7 @@
 ### Task 1: Define the container runtime contract
 
 **Prompt:**
-1. Read `app/runtime.go`, `config/config.go`, `config/load.go`, and `README.md` to confirm which files and directories must exist at runtime: config YAML, SQLite DB path, overlay output path, logo directory, template files, and optional log path.
+1. Read `pkg/app/runtime.go`, `pkg/config/config.go`, `pkg/config/load.go`, and `README.md` to confirm which files and directories must exist at runtime: config YAML, SQLite DB path, overlay output path, logo directory, template files, and optional log path.
 2. Write a short deployment contract section at the top of the implementation branch notes or PR description. State the exact container assumptions:
    - the app reads a mounted config file, not environment variables;
    - templates are baked into the image;

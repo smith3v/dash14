@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 // Importer orchestrates a full team import: it parses a YAML file, copies any

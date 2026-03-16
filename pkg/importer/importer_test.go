@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/smith3v/dash14/storage"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 // openTestDB opens a fresh SQLite database in a temp directory and runs all

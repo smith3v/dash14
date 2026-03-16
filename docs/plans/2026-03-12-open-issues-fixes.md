@@ -4,7 +4,7 @@
 
 **Goal:** Resolve GitHub issues #2, #3, and #4 with isolated, test-backed commits.
 
-**Architecture:** Keep fixes scoped by issue: Telegram broadcast behavior in `telegram`, match lifecycle rules in `game` + docs, and CI configuration in `.github/workflows`. Preserve existing package boundaries and table-driven tests.
+**Architecture:** Keep fixes scoped by issue: Telegram broadcast behavior in `pkg/telegram`, match lifecycle rules in `pkg/game` + docs, and CI configuration in `.github/workflows`. Preserve existing package boundaries and table-driven tests.
 
 **Tech Stack:** Go 1.26, GORM/SQLite, GitHub Actions
 
@@ -13,31 +13,31 @@
 ### Task 1: Issue #2 - Do Not Broadcast Updates To Current Admin
 
 **Files:**
-- Modify: `telegram/broadcast.go`
-- Modify: `telegram/game_control.go`
-- Modify: `telegram/start_stop_test.go`
-- Modify: `telegram/game_control_test.go`
+- Modify: `pkg/telegram/broadcast.go`
+- Modify: `pkg/telegram/game_control.go`
+- Modify: `pkg/telegram/start_stop_test.go`
+- Modify: `pkg/telegram/game_control_test.go`
 
 **Step 1: Write the failing tests**
 
-- Add a test for broadcast exclusion behavior in `telegram/start_stop_test.go`.
-- Add a game-control test in `telegram/game_control_test.go` that verifies score update broadcasts are sent to subscribed users but skipped for the current admin.
+- Add a test for broadcast exclusion behavior in `pkg/telegram/start_stop_test.go`.
+- Add a game-control test in `pkg/telegram/game_control_test.go` that verifies score update broadcasts are sent to subscribed users but skipped for the current admin.
 
 **Step 2: Run tests to verify failure**
 
-Run: `go test ./telegram -run 'Broadcast|GameControl' -v`
+Run: `go test ./pkg/telegram -run 'Broadcast|GameControl' -v`
 
 Expected: FAIL for new exclusion expectations.
 
 **Step 3: Write minimal implementation**
 
-- Add an exclusion-aware broadcast path in `telegram/broadcast.go`.
-- Update game-control callback flow in `telegram/game_control.go` to broadcast update messages while excluding `CurrentAdminUserID`.
+- Add an exclusion-aware broadcast path in `pkg/telegram/broadcast.go`.
+- Update game-control callback flow in `pkg/telegram/game_control.go` to broadcast update messages while excluding `CurrentAdminUserID`.
 - Keep existing `Broadcast` behavior unchanged for callers that do not pass exclusions.
 
 **Step 4: Run tests to verify pass**
 
-Run: `go test ./telegram -run 'Broadcast|GameControl' -v`
+Run: `go test ./pkg/telegram -run 'Broadcast|GameControl' -v`
 
 Expected: PASS.
 
@@ -46,7 +46,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add telegram/broadcast.go telegram/game_control.go telegram/start_stop_test.go telegram/game_control_test.go
+git add pkg/telegram/broadcast.go pkg/telegram/game_control.go pkg/telegram/start_stop_test.go pkg/telegram/game_control_test.go
 git commit -m "telegram: skip broadcasts to active admin"
 ```
 
@@ -54,10 +54,10 @@ git commit -m "telegram: skip broadcasts to active admin"
 
 **Files:**
 - Modify: `docs/2026-03-09-dash14-design.md`
-- Modify: `game/lifecycle.go`
-- Modify: `game/lifecycle_test.go`
-- Modify: `telegram/game_control.go`
-- Modify: `telegram/game_control_test.go`
+- Modify: `pkg/game/lifecycle.go`
+- Modify: `pkg/game/lifecycle_test.go`
+- Modify: `pkg/telegram/game_control.go`
+- Modify: `pkg/telegram/game_control_test.go`
 
 **Step 1: Write the failing tests**
 
@@ -70,14 +70,14 @@ git commit -m "telegram: skip broadcasts to active admin"
 
 **Step 2: Run tests to verify failure**
 
-Run: `go test ./game ./telegram -run 'ConfirmSetFinished|ConfirmGameFinished|GameControl' -v`
+Run: `go test ./pkg/game ./pkg/telegram -run 'ConfirmSetFinished|ConfirmGameFinished|GameControl' -v`
 
 Expected: FAIL against old 3-set logic.
 
 **Step 3: Write minimal implementation**
 
 - Update match-rule section in design doc to the new set-count policy.
-- Change `ConfirmSetFinished` transitions in `game/lifecycle.go`:
+- Change `ConfirmSetFinished` transitions in `pkg/game/lifecycle.go`:
   - always continue through set 4,
   - create set 5 only when set score reaches `2-2` after set 4,
   - prompt finish after set 4 when not tied, or after set 5.
@@ -86,7 +86,7 @@ Expected: FAIL against old 3-set logic.
 
 **Step 4: Run tests to verify pass**
 
-Run: `go test ./game ./telegram -v`
+Run: `go test ./pkg/game ./pkg/telegram -v`
 
 Expected: PASS.
 
@@ -95,7 +95,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add docs/2026-03-09-dash14-design.md game/lifecycle.go game/lifecycle_test.go telegram/game_control.go telegram/game_control_test.go
+git add docs/2026-03-09-dash14-design.md pkg/game/lifecycle.go pkg/game/lifecycle_test.go pkg/telegram/game_control.go pkg/telegram/game_control_test.go
 git commit -m "game: require at least four sets before finish"
 ```
 
