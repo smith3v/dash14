@@ -68,17 +68,17 @@ telegram:
   token: "123456789:your-real-bot-token"
 
 sqlite:
-  path: "var/dash14.db"
+  path: "runtime/data/dash14.db"
 
 overlay:
   planned_template_path: "templates/planned.html.tmpl"
   live_template_path: "templates/live.html.tmpl"
-  output_path: "out/overlay.html"
-  logo_dir: "var/logos"
+  output_path: "runtime/out/overlay.html"
+  logo_dir: "runtime/data/logos"
 
 logging:
   level: "info"
-  file_path: "var/dash14.log"
+  file_path: "runtime/logs/dash14.log"
 ```
 
 ## Deployment
@@ -199,7 +199,7 @@ WHERE telegram_user_id = 123456789;
 
 1. Start `dash14` runtime.
 2. In OBS, add a **Browser Source**.
-3. Point it to the local generated overlay file, e.g. `out/overlay.html`.
+3. Point it to the local generated overlay file, e.g. `runtime/out/overlay.html`.
 4. Re-rendering happens after state changes.
 
 ## Development
@@ -213,12 +213,12 @@ go test ./...
 ### Run package-specific tests
 
 ```bash
-go test ./telegram -run Plan
-go test ./telegram -run GameControl
-go test ./telegram -run Takeover
-go test ./storage -run 'Game|AppState'
-go test ./game
-go test ./overlay
+go test ./pkg/telegram -run Plan
+go test ./pkg/telegram -run GameControl
+go test ./pkg/telegram -run Takeover
+go test ./pkg/storage -run 'Game|AppState'
+go test ./pkg/game
+go test ./pkg/overlay
 ```
 
 ### Format

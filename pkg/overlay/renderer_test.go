@@ -14,8 +14,8 @@ import (
 // template syntax is validated end-to-end.
 func templateDir(t *testing.T) string {
 	t.Helper()
-	// This file lives at overlay/renderer_test.go; templates/ is one level up.
-	dir, err := filepath.Abs(filepath.Join("..", "templates"))
+	// This file lives at pkg/overlay/renderer_test.go; templates/ is two levels up.
+	dir, err := filepath.Abs(filepath.Join("..", "..", "templates"))
 	if err != nil {
 		t.Fatalf("could not resolve templates dir: %v", err)
 	}
