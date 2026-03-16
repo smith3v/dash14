@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 )
 
 // TestParseLevelKnown verifies that each accepted level string produces the

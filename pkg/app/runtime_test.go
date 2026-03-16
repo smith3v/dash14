@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/storage"
 	"github.com/smith3v/dash14/pkg/telegram"
 )

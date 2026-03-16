@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/importer"
 	"github.com/smith3v/dash14/pkg/logging"
 	"github.com/smith3v/dash14/pkg/overlay"

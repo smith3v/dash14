@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/smith3v/dash14/config"
+	"github.com/smith3v/dash14/pkg/config"
 )
 
 // templateDir returns the absolute path to the templates directory relative to
