@@ -14,7 +14,7 @@ func TestUnknownCommandNonAdminGetsSubscriberHelp(t *testing.T) {
 	const userID int64 = 7401
 	const chatID int64 = 8401
 
-	if err := store.users.UpsertTelegramUser(userID, "viewer"); err != nil {
+	if err := store.users.UpsertTelegramUser(userID, "viewer", "Viewer"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 	createCurrentPlannedGame(t, store, 0)

@@ -16,7 +16,7 @@ func TestUserInitialInsert(t *testing.T) {
 
 	const telegramID int64 = 100001
 
-	if err := repo.UpsertTelegramUser(telegramID, "alice"); err != nil {
+	if err := repo.UpsertTelegramUser(telegramID, "alice", "Alice Example"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 
@@ -30,6 +30,9 @@ func TestUserInitialInsert(t *testing.T) {
 	}
 	if got.Username != "alice" {
 		t.Errorf("Username: got %q, want %q", got.Username, "alice")
+	}
+	if got.DisplayName != "Alice Example" {
+		t.Errorf("DisplayName: got %q, want %q", got.DisplayName, "Alice Example")
 	}
 	if !got.Subscribed {
 		t.Error("Subscribed: expected true after initial UpsertTelegramUser, got false")
@@ -54,7 +57,7 @@ func TestUserUsernameUpdateOnRepeatUpsert(t *testing.T) {
 	const telegramID int64 = 100002
 
 	// First call — creates the user.
-	if err := repo.UpsertTelegramUser(telegramID, "bob_old"); err != nil {
+	if err := repo.UpsertTelegramUser(telegramID, "bob_old", "Bob Old"); err != nil {
 		t.Fatalf("first UpsertTelegramUser: %v", err)
 	}
 
@@ -64,7 +67,7 @@ func TestUserUsernameUpdateOnRepeatUpsert(t *testing.T) {
 	}
 
 	// Second call — same ID, new username.
-	if err := repo.UpsertTelegramUser(telegramID, "bob_new"); err != nil {
+	if err := repo.UpsertTelegramUser(telegramID, "bob_new", "Bob New"); err != nil {
 		t.Fatalf("second UpsertTelegramUser: %v", err)
 	}
 
@@ -74,6 +77,9 @@ func TestUserUsernameUpdateOnRepeatUpsert(t *testing.T) {
 	}
 	if got.Username != "bob_new" {
 		t.Errorf("Username: got %q, want %q", got.Username, "bob_new")
+	}
+	if got.DisplayName != "Bob New" {
+		t.Errorf("DisplayName: got %q, want %q", got.DisplayName, "Bob New")
 	}
 	// Subscribed must remain false — upsert must not touch it.
 	if got.Subscribed {
@@ -96,7 +102,7 @@ func TestUserUnsubscribeOnStop(t *testing.T) {
 
 	const telegramID int64 = 100003
 
-	if err := repo.UpsertTelegramUser(telegramID, "carol"); err != nil {
+	if err := repo.UpsertTelegramUser(telegramID, "carol", "Carol"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 
@@ -143,14 +149,15 @@ func TestUserListOnlySubscribed(t *testing.T) {
 	users := []struct {
 		id       int64
 		username string
+		display  string
 	}{
-		{200001, "dave"},
-		{200002, "eve"},
-		{200003, "frank"},
+		{200001, "dave", "Dave"},
+		{200002, "eve", "Eve"},
+		{200003, "frank", "Frank"},
 	}
 
 	for _, u := range users {
-		if err := repo.UpsertTelegramUser(u.id, u.username); err != nil {
+		if err := repo.UpsertTelegramUser(u.id, u.username, u.display); err != nil {
 			t.Fatalf("UpsertTelegramUser(%d): %v", u.id, err)
 		}
 	}

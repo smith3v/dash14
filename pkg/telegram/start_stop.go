@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -16,13 +17,15 @@ func (r *Router) handleStart(ctx context.Context, b *bot.Bot, update *models.Upd
 	chatID := update.Message.Chat.ID
 
 	username := ""
+	displayName := ""
 	if update.Message.From != nil {
 		username = update.Message.From.Username
+		displayName = telegramDisplayName(update.Message.From)
 	}
 
 	r.logger.InfoContext(ctx, "received /start", "user_id", userID)
 
-	if err := r.users.UpsertTelegramUser(userID, username); err != nil {
+	if err := r.users.UpsertTelegramUser(userID, username, displayName); err != nil {
 		r.logger.ErrorContext(ctx, "handleStart: upsert user failed",
 			"user_id", userID, "err", err)
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
@@ -56,13 +59,15 @@ func (r *Router) handleStop(ctx context.Context, b *bot.Bot, update *models.Upda
 	chatID := update.Message.Chat.ID
 
 	username := ""
+	displayName := ""
 	if update.Message.From != nil {
 		username = update.Message.From.Username
+		displayName = telegramDisplayName(update.Message.From)
 	}
 
 	r.logger.InfoContext(ctx, "received /stop", "user_id", userID)
 
-	if err := r.users.UpsertTelegramUser(userID, username); err != nil {
+	if err := r.users.UpsertTelegramUser(userID, username, displayName); err != nil {
 		r.logger.ErrorContext(ctx, "handleStop: upsert user failed",
 			"user_id", userID, "err", err)
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
@@ -86,4 +91,13 @@ func (r *Router) handleStop(ctx context.Context, b *bot.Bot, update *models.Upda
 		ChatID: chatID,
 		Text:   "You have unsubscribed from match updates.",
 	})
+}
+
+func telegramDisplayName(user *models.User) string {
+	if user == nil {
+		return ""
+	}
+
+	fullName := strings.TrimSpace(strings.TrimSpace(user.FirstName) + " " + strings.TrimSpace(user.LastName))
+	return fullName
 }

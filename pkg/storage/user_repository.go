@@ -18,19 +18,21 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-// UpsertTelegramUser inserts a new user or updates the Username field for an
-// existing user matched by TelegramUserID. On first insert the Subscribed flag
-// is set to true so that the user immediately receives broadcasts after /start.
-// Subsequent calls update Username only, leaving Subscribed and IsAdmin intact.
-func (r *UserRepository) UpsertTelegramUser(telegramUserID int64, username string) error {
+// UpsertTelegramUser inserts a new user or updates the Username and
+// DisplayName fields for an existing user matched by TelegramUserID. On first
+// insert the Subscribed flag is set to true so that the user immediately
+// receives broadcasts after /start. Subsequent calls update only the profile
+// fields, leaving Subscribed and IsAdmin intact.
+func (r *UserRepository) UpsertTelegramUser(telegramUserID int64, username string, displayName string) error {
 	user := User{
 		TelegramUserID: telegramUserID,
 		Username:       username,
+		DisplayName:    displayName,
 		Subscribed:     true,
 	}
 	result := r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "telegram_user_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"username", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"username", "display_name", "updated_at"}),
 	}).Create(&user)
 	if result.Error != nil {
 		return fmt.Errorf("storage: upsert user %d: %w", telegramUserID, result.Error)

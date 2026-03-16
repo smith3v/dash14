@@ -141,7 +141,7 @@ func TestPlanNonAdminRejected(t *testing.T) {
 	const chatID int64 = 8001
 
 	// Insert user as a non-admin.
-	if err := store.users.UpsertTelegramUser(userID, "notadmin"); err != nil {
+	if err := store.users.UpsertTelegramUser(userID, "notadmin", "Not Admin"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 

@@ -8,6 +8,7 @@ import "time"
 type User struct {
 	TelegramUserID int64  `gorm:"primaryKey"`
 	Username       string `gorm:"not null;default:''"`
+	DisplayName    string `gorm:"not null;default:''"`
 	Subscribed     bool   `gorm:"not null;default:false"`
 	IsAdmin        bool   `gorm:"not null;default:false"`
 	CreatedAt      time.Time

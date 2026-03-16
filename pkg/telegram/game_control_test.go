@@ -320,7 +320,7 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 	const subID int64 = 7304
 	const chatID int64 = 8303
 	store.createAdminUser(t, adminID, "owner5")
-	if err := store.users.UpsertTelegramUser(subID, "subscriber"); err != nil {
+	if err := store.users.UpsertTelegramUser(subID, "subscriber", "Subscriber"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 	game := createCurrentPlannedGame(t, store, adminID)
