@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 func TestTakeoverSuccess(t *testing.T) {
@@ -42,7 +44,7 @@ func TestTakeoverSuccess(t *testing.T) {
 	var ownerNotified bool
 	var newAdminNotified bool
 	for _, m := range msgs {
-		if m.ChatID == ownerID && strings.Contains(m.Text, "transferred") {
+		if m.ChatID == ownerID && m.Text == "Game control was transferred to @newowner." {
 			ownerNotified = true
 		}
 		if m.ChatID == chatID && strings.Contains(m.Text, "Run /game") {
@@ -55,6 +57,38 @@ func TestTakeoverSuccess(t *testing.T) {
 	if !newAdminNotified {
 		t.Fatal("expected new admin notification")
 	}
+}
+
+func TestTakeoverFallsBackToDisplayName(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const ownerID int64 = 7411
+	const newAdminID int64 = 7412
+	const chatID int64 = 8411
+	store.createAdminUser(t, ownerID, "owner")
+	if err := store.users.UpsertTelegramUser(newAdminID, "", "Alex Admin"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	if err := store.db.Model(&storage.User{}).
+		Where("telegram_user_id = ?", newAdminID).
+		Update("is_admin", true).Error; err != nil {
+		t.Fatalf("set is_admin: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, ownerID)
+	if err := store.games.SaveGame(game); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+
+	r.handleTakeover(ctx, nil, makeTextUpdate(newAdminID, chatID, "/takeover"))
+
+	for _, m := range fb.SentMessages() {
+		if m.ChatID == ownerID && m.Text == "Game control was transferred to Alex Admin." {
+			return
+		}
+	}
+	t.Fatal("expected previous admin notification with display-name fallback")
 }
 
 func TestTakeoverRejectedWhenNoCurrentGame(t *testing.T) {
@@ -85,7 +119,7 @@ func TestTakeoverRejectedForNonAdmin(t *testing.T) {
 
 	const userID int64 = 7404
 	const chatID int64 = 8404
-	if err := store.users.UpsertTelegramUser(userID, "viewer"); err != nil {
+	if err := store.users.UpsertTelegramUser(userID, "viewer", "Viewer"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 

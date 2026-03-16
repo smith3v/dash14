@@ -42,9 +42,14 @@ func openTestStore(t *testing.T) *testStore {
 // createAdminUser directly inserts a user record with IsAdmin=true.
 func (s *testStore) createAdminUser(t *testing.T, telegramUserID int64, username string) {
 	t.Helper()
+	displayName := username
+	if displayName == "" {
+		displayName = "Admin User"
+	}
 	if err := s.db.Create(&storage.User{
 		TelegramUserID: telegramUserID,
 		Username:       username,
+		DisplayName:    displayName,
 		Subscribed:     true,
 		IsAdmin:        true,
 	}).Error; err != nil {
@@ -89,6 +94,9 @@ func TestStartSubscribesNewUser(t *testing.T) {
 	if !got.Subscribed {
 		t.Error("expected Subscribed=true after /start, got false")
 	}
+	if got.DisplayName != "TestUser" {
+		t.Errorf("expected DisplayName=TestUser after /start, got %q", got.DisplayName)
+	}
 
 	// A confirmation message must have been sent.
 	msgs := fb.SentMessages()
@@ -112,7 +120,7 @@ func TestStartResubscribesExistingUser(t *testing.T) {
 	const chatID int64 = 2002
 
 	// Create user and immediately unsubscribe.
-	if err := store.users.UpsertTelegramUser(userID, "dave"); err != nil {
+	if err := store.users.UpsertTelegramUser(userID, "dave", "Dave"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 	if err := store.users.SetSubscription(userID, false); err != nil {
@@ -185,6 +193,9 @@ func TestStopWithoutPriorStartCreatesAndUnsubscribes(t *testing.T) {
 	if got.Subscribed {
 		t.Error("expected Subscribed=false after /stop for new user, got true")
 	}
+	if got.DisplayName != "TestUser" {
+		t.Errorf("expected DisplayName=TestUser after /stop, got %q", got.DisplayName)
+	}
 }
 
 // --- requireAdmin tests -----------------------------------------------------
@@ -224,7 +235,7 @@ func TestAuthRequireAdminRejectsNonAdmin(t *testing.T) {
 	const chatID int64 = 8002
 
 	// Create a non-admin user.
-	if err := store.users.UpsertTelegramUser(userID, "nonadmin"); err != nil {
+	if err := store.users.UpsertTelegramUser(userID, "nonadmin", "Non Admin"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 
@@ -315,7 +326,7 @@ func TestBroadcastSendsToAllSubscribed(t *testing.T) {
 	ctx := context.Background()
 
 	for _, id := range []int64{3001, 3002, 3003} {
-		if err := store.users.UpsertTelegramUser(id, ""); err != nil {
+		if err := store.users.UpsertTelegramUser(id, "", "Viewer"); err != nil {
 			t.Fatalf("UpsertTelegramUser(%d): %v", id, err)
 		}
 	}
@@ -338,7 +349,7 @@ func TestBroadcastPartialFailureContinues(t *testing.T) {
 	ctx := context.Background()
 
 	for _, id := range []int64{4001, 4002, 4003} {
-		if err := store.users.UpsertTelegramUser(id, ""); err != nil {
+		if err := store.users.UpsertTelegramUser(id, "", "Viewer"); err != nil {
 			t.Fatalf("UpsertTelegramUser(%d): %v", id, err)
 		}
 	}
@@ -362,7 +373,7 @@ func TestBroadcastSkipsUnsubscribed(t *testing.T) {
 	ctx := context.Background()
 
 	for _, id := range []int64{5001, 5002} {
-		if err := store.users.UpsertTelegramUser(id, ""); err != nil {
+		if err := store.users.UpsertTelegramUser(id, "", "Viewer"); err != nil {
 			t.Fatalf("UpsertTelegramUser(%d): %v", id, err)
 		}
 	}
@@ -387,7 +398,7 @@ func TestBroadcastExceptSkipsExcluded(t *testing.T) {
 	ctx := context.Background()
 
 	for _, id := range []int64{6001, 6002, 6003} {
-		if err := store.users.UpsertTelegramUser(id, ""); err != nil {
+		if err := store.users.UpsertTelegramUser(id, "", "Viewer"); err != nil {
 			t.Fatalf("UpsertTelegramUser(%d): %v", id, err)
 		}
 	}

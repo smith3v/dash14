@@ -3,9 +3,11 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 // handleTakeover transfers game administration to the calling admin and
@@ -56,13 +58,31 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 	}
 
 	if previousAdminID != 0 && previousAdminID != userID {
+		newAdminLabel := "another admin"
+		user, getUserErr := r.users.GetUserByTelegramID(userID)
+		if getUserErr == nil {
+			newAdminLabel = takeoverAdminLabel(user)
+		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: previousAdminID,
-			Text:   fmt.Sprintf("Game control was transferred to admin %d.", userID),
+			Text:   fmt.Sprintf("Game control was transferred to %s.", newAdminLabel),
 		})
 	}
 	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   "Takeover successful. Run /game to open a fresh control message.",
 	})
+}
+
+func takeoverAdminLabel(user *storage.User) string {
+	if user == nil {
+		return "another admin"
+	}
+	if username := strings.TrimSpace(user.Username); username != "" {
+		return "@" + username
+	}
+	if displayName := strings.TrimSpace(user.DisplayName); displayName != "" {
+		return displayName
+	}
+	return "another admin"
 }
