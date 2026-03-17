@@ -69,9 +69,17 @@ type LiveViewModel struct {
 	// side assignment for the current game.
 	LeftTeamName string
 
+	// LeftTeamLabel identifies whether the left-side team is the home or guest
+	// team for the current game.
+	LeftTeamLabel string
+
 	// RightTeamName is the name of the team displayed on the right side of
 	// the overlay.
 	RightTeamName string
+
+	// RightTeamLabel identifies whether the right-side team is the home or
+	// guest team for the current game.
+	RightTeamLabel string
 
 	// LeftScore is the current set point tally for the left-side team.
 	LeftScore int

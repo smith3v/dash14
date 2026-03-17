@@ -446,14 +446,18 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 		guestScore = activeSet.GuestScore
 	}
 	leftName := home.Name
+	leftLabel := "Home Team"
 	rightName := guest.Name
+	rightLabel := "Guest Team"
 	leftScore := homeScore
 	rightScore := guestScore
 	leftSets := game.HomeSetsWon
 	rightSets := game.GuestSetsWon
 	if game.HomeTeamSide == "right" {
 		leftName = guest.Name
+		leftLabel = "Guest Team"
 		rightName = home.Name
+		rightLabel = "Home Team"
 		leftScore = guestScore
 		rightScore = homeScore
 		leftSets = game.GuestSetsWon
@@ -473,7 +477,9 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 		GuestSetsWon:       game.GuestSetsWon,
 		CurrentSetNumber:   game.CurrentSetNumber,
 		LeftTeamName:       leftName,
+		LeftTeamLabel:      leftLabel,
 		RightTeamName:      rightName,
+		RightTeamLabel:     rightLabel,
 		LeftScore:          leftScore,
 		RightScore:         rightScore,
 		LeftSetsWon:        leftSets,
