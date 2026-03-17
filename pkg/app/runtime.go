@@ -190,14 +190,18 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 	homeScore := set.HomeScore
 	guestScore := set.GuestScore
 	leftName := home.Name
+	leftLabel := "Home Team"
 	rightName := guest.Name
+	rightLabel := "Guest Team"
 	leftScore := homeScore
 	rightScore := guestScore
 	leftSets := current.HomeSetsWon
 	rightSets := current.GuestSetsWon
 	if current.HomeTeamSide == "right" {
 		leftName = guest.Name
+		leftLabel = "Guest Team"
 		rightName = home.Name
+		rightLabel = "Home Team"
 		leftScore = guestScore
 		rightScore = homeScore
 		leftSets = current.GuestSetsWon
@@ -217,7 +221,9 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 		GuestSetsWon:       current.GuestSetsWon,
 		CurrentSetNumber:   current.CurrentSetNumber,
 		LeftTeamName:       leftName,
+		LeftTeamLabel:      leftLabel,
 		RightTeamName:      rightName,
+		RightTeamLabel:     rightLabel,
 		LeftScore:          leftScore,
 		RightScore:         rightScore,
 		LeftSetsWon:        leftSets,

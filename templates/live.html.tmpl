@@ -76,7 +76,7 @@
     }
 
     .name {
-      font-size: 44px;
+      font-size: 26px;
       font-weight: 800;
       line-height: 0.95;
       text-transform: uppercase;
@@ -181,7 +181,7 @@
   <section class="overlay" aria-label="Live game overlay">
     <article class="team left-team">
       <div class="meta">
-        <div class="role">{{.LeftTeamName}}</div>
+        <div class="role">{{.LeftTeamLabel}}</div>
         <div class="name">{{.LeftTeamName}}</div>
         <div class="sets">Sets <strong>{{.LeftSetsWon}}</strong></div>
       </div>
@@ -205,13 +205,13 @@
         <div class="points-label">Points</div>
       </div>
       <div class="meta">
-        <div class="role">{{.RightTeamName}}</div>
+        <div class="role">{{.RightTeamLabel}}</div>
         <div class="name">{{.RightTeamName}}</div>
         <div class="sets">Sets <strong>{{.RightSetsWon}}</strong></div>
       </div>
     </article>
   </section>
-  <script>
+<script>
     window.setInterval(() => {
       window.location.reload();
     }, 2000);

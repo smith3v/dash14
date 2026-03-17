@@ -41,11 +41,14 @@ func TestRenderPlanned(t *testing.T) {
 
 	r := NewRenderer(cfg)
 
+	const homeLongName = "Kroefi HS 1"
+	const guestLongName = "Spaarnestad HS 14"
+
 	vm := PlannedViewModel{
-		HomeTeamName:       "Dynamo",
+		HomeTeamName:       homeLongName,
 		HomeTeamShortName:  "DYN",
 		HomeTeamLogoPath:   "home.png",
-		GuestTeamName:      "Aurora",
+		GuestTeamName:      guestLongName,
 		GuestTeamShortName: "AUR",
 		GuestTeamLogoPath:  "guest.png",
 	}
@@ -65,13 +68,14 @@ func TestRenderPlanned(t *testing.T) {
 		desc string
 		want string
 	}{
-		{"home team name", "Dynamo"},
-		{"guest team name", "Aurora"},
+		{"home team name", homeLongName},
+		{"guest team name", guestLongName},
 		{"home short name", "DYN"},
 		{"guest short name", "AUR"},
 		{"home logo src", `src="home.png"`},
 		{"guest logo src", `src="guest.png"`},
 		{"upcoming label", "Upcoming"},
+		{"planned font", "font-size: 34px;"},
 		{"doctype", "<!DOCTYPE html>"},
 	}
 
@@ -106,11 +110,14 @@ func TestRenderLive(t *testing.T) {
 
 	r := NewRenderer(cfg)
 
+	const leftLongName = "Kroefi HS 1"
+	const rightLongName = "Spaarnestad HS 14"
+
 	vm := LiveViewModel{
-		HomeTeamName:       "Dynamo",
+		HomeTeamName:       leftLongName,
 		HomeTeamShortName:  "DYN",
 		HomeTeamLogoPath:   "home.png",
-		GuestTeamName:      "Aurora",
+		GuestTeamName:      rightLongName,
 		GuestTeamShortName: "AUR",
 		GuestTeamLogoPath:  "guest.png",
 		HomeScore:          18,
@@ -118,8 +125,10 @@ func TestRenderLive(t *testing.T) {
 		HomeSetsWon:        2,
 		GuestSetsWon:       1,
 		CurrentSetNumber:   4,
-		LeftTeamName:       "Dynamo",
-		RightTeamName:      "Aurora",
+		LeftTeamName:       leftLongName,
+		LeftTeamLabel:      "Home Team",
+		RightTeamName:      rightLongName,
+		RightTeamLabel:     "Guest Team",
 		LeftScore:          18,
 		RightScore:         11,
 		LeftSetsWon:        2,
@@ -141,12 +150,15 @@ func TestRenderLive(t *testing.T) {
 		desc string
 		want string
 	}{
-		{"left team name (Dynamo)", "Dynamo"},
-		{"right team name (Aurora)", "Aurora"},
+		{"left team name", leftLongName},
+		{"right team name", rightLongName},
+		{"left team label", "Home Team"},
+		{"right team label", "Guest Team"},
 		{"left score", "18"},
 		{"right score", "11"},
 		{"current set number", "4"},
 		{"live status", "Live"},
+		{"live font", "font-size: 26px;"},
 		{"doctype", "<!DOCTYPE html>"},
 	}
 
