@@ -344,7 +344,7 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 	msgs := fb.SentMessages()
 	foundBroadcast := false
 	for _, m := range msgs {
-		if m.ChatID == subID && strings.Contains(m.Text, "Set 1:") && strings.Contains(m.Text, "Sets") {
+		if m.ChatID == subID && strings.Contains(m.Text, "Current set: 1") && strings.Contains(m.Text, "Game score") {
 			foundBroadcast = true
 			break
 		}

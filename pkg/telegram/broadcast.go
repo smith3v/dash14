@@ -35,8 +35,9 @@ func (r *Router) BroadcastExcept(ctx context.Context, text string, excludeUserID
 			continue
 		}
 		_, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: u.TelegramUserID,
-			Text:   text,
+			ChatID:    u.TelegramUserID,
+			Text:      text,
+			ParseMode: "HTML",
 		})
 		if err != nil {
 			r.logger.WarnContext(ctx, "Broadcast: send to user failed",
