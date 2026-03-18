@@ -1,13 +1,14 @@
 # dash14
 
 `dash14` is a local Go application for volleyball match control during streams.
-It stores match state in SQLite, renders an OBS-ready HTML overlay file, and exposes control through a Telegram bot.
+It stores match state in SQLite, renders OBS-ready HTML overlay files, and exposes control through a Telegram bot.
 
 ## Features
 
 - Single active match per device (`planned`, `in_progress`, `finished`)
 - Team import from YAML with logo copy into a managed local directory
-- OBS overlay rendering for planned and live states (atomic file writes)
+- OBS overlay rendering for planned, live, and intermission states
+- Separate intermission scoreboard page with per-set history and live in-set scores
 - Telegram subscriber flow (`/start`, `/stop`)
 - Admin-only game planning and control (`/plan`, `/game`, `/takeover`)
 - Read-only broadcast updates to subscribed users
@@ -58,6 +59,7 @@ Important: current template files in this repository are:
 
 - `templates/planned.html.tmpl`
 - `templates/live.html.tmpl`
+- `templates/intermission.html.tmpl`
 
 So update overlay template paths accordingly.
 
@@ -73,6 +75,7 @@ sqlite:
 overlay:
   planned_template_path: "templates/planned.html.tmpl"
   live_template_path: "templates/live.html.tmpl"
+  intermission_template_path: "templates/intermission.html.tmpl"
   output_path: "runtime/out/overlay.html"
   logo_dir: "runtime/data/logos"
 
@@ -153,7 +156,7 @@ What it does:
 - initializes logging
 - opens SQLite and runs migrations
 - validates template paths
-- renders current overlay (if a current game exists)
+- renders current overlay pages (if a current game exists)
 - starts Telegram update polling and blocks
 
 ## Telegram Workflow
@@ -170,7 +173,7 @@ What it does:
   - choose guest team (search)
   - creates `planned` game
   - sets current game admin
-  - renders planned overlay
+  - renders planned overlay and intermission page
 - `/game` opens/refreshes control message for current admin
 - `/takeover` transfers admin ownership of current game
 
@@ -198,9 +201,10 @@ WHERE telegram_user_id = 123456789;
 ## OBS Setup
 
 1. Start `dash14` runtime.
-2. In OBS, add a **Browser Source**.
-3. Point it to the local generated overlay file, e.g. `runtime/out/overlay.html`.
-4. Re-rendering happens after state changes.
+2. In OBS, add a **Browser Source** for the normal planned/live overlay.
+3. Point it to `runtime/out/overlay.html`.
+4. Add a second **Browser Source** for the break screen and point it to `runtime/out/intermission.html`.
+5. Re-rendering happens after state changes, including updates to the current unfinished set.
 
 ## Development
 
@@ -231,7 +235,7 @@ gofmt -w ./...
 
 - `--config is required`: provide `--config config.yaml`.
 - Template validation fails at startup:
-  - verify `overlay.planned_template_path` and `overlay.live_template_path`
+  - verify `overlay.planned_template_path`, `overlay.live_template_path`, and `overlay.intermission_template_path`
   - ensure files exist and are readable.
 - Bot does not respond:
   - verify `telegram.token`
@@ -241,6 +245,9 @@ gofmt -w ./...
 - Overlay not updating in OBS:
   - confirm `overlay.output_path`
   - ensure OBS is reading the same file path.
+- Intermission screen not updating:
+  - ensure OBS is pointed at `intermission.html` in the same directory as `overlay.output_path`
+  - verify `overlay.intermission_template_path` exists and is readable.
 
 ## Security Notes
 

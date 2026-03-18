@@ -21,7 +21,7 @@ Examples:
 
 - `dash14` reads a mounted YAML config file.
 - Template files are baked into the app image.
-- SQLite, rendered overlay output, copied logos, and logs live on mounted writable storage.
+- SQLite, rendered overlay output files, copied logos, and logs live on mounted writable storage.
 - `nginx` serves the generated overlay files.
 - Cloudflare Tunnel proxies `nginx`, not the app process directly.
 
@@ -83,7 +83,18 @@ These paths match the current image and compose wiring:
 - `./runtime/logs` -> `/logs`
 - templates are baked into the image at `/app/templates`
 
+Set all three overlay template paths in `deploy/config/config.container.yaml`:
+
+- `overlay.planned_template_path: /app/templates/planned.html.tmpl`
+- `overlay.live_template_path: /app/templates/live.html.tmpl`
+- `overlay.intermission_template_path: /app/templates/intermission.html.tmpl`
+
 The app itself is not an HTTP server. It only writes files to `/out`, and `nginx` serves those files.
+
+The generated pages are:
+
+- `/out/overlay.html` for the main planned/live overlay
+- `/out/intermission.html` for the pre-match and between-set scoreboard
 
 ## Cloudflare Config
 
@@ -127,7 +138,12 @@ Then start the deployment:
 docker compose up -d
 ```
 
-`nginx` serves the generated overlay on the local compose endpoint at `http://127.0.0.1:8080/`, and Cloudflare Tunnel publishes that through the configured hostname.
+`nginx` serves the generated overlay files on the local compose endpoint at:
+
+- `http://127.0.0.1:8080/overlay.html`
+- `http://127.0.0.1:8080/intermission.html`
+
+Cloudflare Tunnel publishes those through the configured hostname.
 
 ## Verification
 
@@ -139,6 +155,8 @@ docker compose logs app
 docker compose logs nginx
 docker compose logs cloudflared
 curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/overlay.html
+curl http://127.0.0.1:8080/intermission.html
 ```
 
 For local validation of the deployment assets before rollout, run:
@@ -175,3 +193,12 @@ Back up these paths on the NAS:
 - `deploy/cloudflared/credentials.json` and `deploy/cloudflared/config.yml` for tunnel access
 
 If you move the deployment to another machine, those files are the state you need to bring with it.
+
+## OBS Wiring
+
+Use two OBS browser sources:
+
+- `overlay.html` for normal match presentation
+- `intermission.html` for pre-match and between-set scenes
+
+Both pages are updated automatically when match state changes, including partial scores in the active set.
