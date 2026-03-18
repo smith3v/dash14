@@ -6,9 +6,9 @@
 - `nginx` serving the generated overlay files
 - `cloudflared` publishing the `nginx` endpoint on your domain
 
-The stack definition lives in `docker-compose.yml`.
+The canonical stack definition lives in `docker-compose.yml`. It is image-based by default so Synology Container Manager can keep using the same tracked file while the deployed image tag is controlled through a local `.env` file.
 
-By default, the compose file builds the app image from the local checkout. Release images published by GitHub Actions are pushed to:
+Release images published by GitHub Actions are pushed to:
 
 - `ghcr.io/smith3v/dash14:<git-tag>`
 
@@ -32,6 +32,7 @@ For image builds, Apple Silicon Docker hosts map to `linux/arm64`. Intel Synolog
 Create these local deployment files from the tracked examples:
 
 ```bash
+cp .env.example .env
 cp deploy/config/config.container.example.yaml deploy/config/config.container.yaml
 cp deploy/cloudflared/config.yml.example deploy/cloudflared/config.yml
 ```
@@ -71,6 +72,23 @@ cp ~/.cloudflared/<tunnel-id>.json deploy/cloudflared/credentials.json
 ```
 
 If you already have an existing tunnel, you only need the matching credentials JSON file and tunnel ID.
+
+## Compose Files
+
+The repository now uses two compose entrypoints:
+
+- `docker-compose.yml` is the tracked default for deployment. It expects `DASH14_IMAGE` to be set in `.env`.
+- `docker-compose.dev.yml` is a tracked local-development overlay that switches the `app` service to `build: .` and `image: dash14:local`.
+
+The `.env` file is intentionally ignored so each machine can pin its own deployed tag without local edits to the tracked compose file.
+
+Example `.env`:
+
+```dotenv
+DASH14_IMAGE=ghcr.io/smith3v/dash14:v1.2.3
+```
+
+On Synology NAS with Container Manager, point the project at the checked-out repository and use `docker-compose.yml` as the compose file it reads from disk. When you want to roll out a newer release, update `.env` instead of editing the compose file itself.
 
 ## App Config
 
@@ -126,16 +144,16 @@ Create the runtime directories once:
 mkdir -p runtime/data runtime/out runtime/logs
 ```
 
-If you want to deploy a published release image instead of building locally, edit `docker-compose.yml` and replace the `app` service `build:` section with an explicit image reference such as:
-
-```yaml
-image: ghcr.io/smith3v/dash14:v1.2.3
-```
-
-Then start the deployment:
+Set the image tag in `.env`, then start the deployment:
 
 ```bash
 docker compose up -d
+```
+
+For local development from the checked-out source tree, layer the dev compose file on top:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 `nginx` serves the generated overlay files on the local compose endpoint at:
@@ -163,8 +181,8 @@ For local validation of the deployment assets before rollout, run:
 
 ```bash
 go test ./...
-docker build -t dash14:dev .
 docker compose config
+docker compose -f docker-compose.yml -f docker-compose.dev.yml config
 docker run --rm -v "$PWD/deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" nginx:stable nginx -t
 ```
 

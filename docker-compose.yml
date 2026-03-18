@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-    image: dash14:local
+    image: ${DASH14_IMAGE}
     restart: unless-stopped
     volumes:
       - ./deploy/config/config.container.yaml:/config/config.yaml:ro
