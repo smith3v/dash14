@@ -100,6 +100,18 @@ func (r *GameRepository) GetActiveSet(gameID uint) (*GameSet, error) {
 	return &set, nil
 }
 
+// ListSetsByGameID returns all sets for the given game ordered by set number.
+func (r *GameRepository) ListSetsByGameID(gameID uint) ([]GameSet, error) {
+	var sets []GameSet
+	if err := r.db.
+		Where("game_id = ?", gameID).
+		Order("set_number ASC").
+		Find(&sets).Error; err != nil {
+		return nil, fmt.Errorf("storage: list sets for game %d: %w", gameID, err)
+	}
+	return sets, nil
+}
+
 // SaveGame persists all fields of the given game record. The game must already
 // exist (have a non-zero ID).
 func (r *GameRepository) SaveGame(game *Game) error {

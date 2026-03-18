@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dash14 Intermission</title>
+  <style>
+    :root {
+      --panel: rgba(8, 14, 24, 0.86);
+      --panel-edge: rgba(255, 255, 255, 0.12);
+      --accent: #f3c54b;
+      --text: #f5f7fb;
+      --muted: #b8c2d8;
+      --table-row: rgba(255, 255, 255, 0.05);
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      font-family: "Arial Narrow", sans-serif;
+      color: var(--text);
+    }
+
+    .overlay {
+      width: min(760px, 100%);
+      border-radius: 22px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(29, 127, 227, 0.16), rgba(225, 78, 58, 0.16)), var(--panel);
+      border: 1px solid var(--panel-edge);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      padding: 24px 28px 18px;
+    }
+
+    .team {
+      display: grid;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .team.guest {
+      justify-items: end;
+      text-align: right;
+    }
+
+    .team-top {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .guest .team-top {
+      grid-template-columns: 1fr auto;
+    }
+
+    .logo {
+      width: 72px;
+      height: 72px;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+
+    .logo-placeholder {
+      width: 72px;
+      height: 72px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--panel-edge);
+    }
+
+    .role {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .name {
+      font-size: 34px;
+      font-weight: 800;
+      line-height: 0.95;
+      text-transform: uppercase;
+    }
+
+    .short-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .scoreboard {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      padding: 18px 28px 20px;
+      background: linear-gradient(180deg, rgba(243, 197, 75, 0.12), rgba(243, 197, 75, 0.03));
+      border-top: 1px solid var(--panel-edge);
+      border-bottom: 1px solid var(--panel-edge);
+    }
+
+    .score-label {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .score-value {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 72px;
+      font-weight: 900;
+      line-height: 1;
+      color: var(--accent);
+    }
+
+    .divider {
+      color: var(--text);
+      opacity: 0.7;
+    }
+
+    .sets {
+      display: grid;
+      gap: 10px;
+      padding: 22px 28px 28px;
+    }
+
+    .set-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 18px;
+      border-radius: 14px;
+      background: var(--table-row);
+      border: 1px solid var(--panel-edge);
+    }
+
+    .set-score {
+      font-family: "Menlo", monospace;
+      font-size: 36px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .set-score.guest {
+      text-align: right;
+    }
+
+    .set-label {
+      min-width: 120px;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-align: center;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .empty-state {
+      padding: 8px 0 4px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-align: center;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .header {
+        grid-template-columns: 1fr;
+      }
+
+      .team.guest {
+        justify-items: start;
+        text-align: left;
+      }
+
+      .guest .team-top {
+        grid-template-columns: auto 1fr;
+      }
+
+      .score-value {
+        font-size: 58px;
+      }
+
+      .set-label {
+        min-width: 88px;
+        font-size: 16px;
+      }
+
+      .set-score {
+        font-size: 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="overlay" aria-label="Intermission scoreboard overlay">
+    <div class="header">
+      <article class="team home">
+        <div class="team-top">
+          {{if .HomeTeamLogoPath}}
+          <img class="logo" src="{{.HomeTeamLogoPath}}" alt="{{.HomeTeamName}} logo">
+          {{else}}
+          <div class="logo-placeholder"></div>
+          {{end}}
+          <div>
+            <div class="role">Home Team</div>
+            <div class="name">{{.HomeTeamName}}</div>
+            {{if .HomeTeamShortName}}<div class="short-name">{{.HomeTeamShortName}}</div>{{end}}
+          </div>
+        </div>
+      </article>
+
+      <article class="team guest">
+        <div class="team-top">
+          <div>
+            <div class="role">Guest Team</div>
+            <div class="name">{{.GuestTeamName}}</div>
+            {{if .GuestTeamShortName}}<div class="short-name">{{.GuestTeamShortName}}</div>{{end}}
+          </div>
+          {{if .GuestTeamLogoPath}}
+          <img class="logo" src="{{.GuestTeamLogoPath}}" alt="{{.GuestTeamName}} logo">
+          {{else}}
+          <div class="logo-placeholder"></div>
+          {{end}}
+        </div>
+      </article>
+    </div>
+
+    <div class="scoreboard">
+      <div class="score-label">Game Score</div>
+      <div class="score-value">
+        <span>{{.HomeSetsWon}}</span>
+        <span class="divider">:</span>
+        <span>{{.GuestSetsWon}}</span>
+      </div>
+    </div>
+
+    <div class="sets">
+      {{if .SetScores}}
+      {{range .SetScores}}
+      <div class="set-row">
+        <div class="set-score">{{.HomeScore}}</div>
+        <div class="set-label">Set {{.SetNumber}}</div>
+        <div class="set-score guest">{{.GuestScore}}</div>
+      </div>
+      {{end}}
+      {{else}}
+      <div class="empty-state">Match has not started</div>
+      {{end}}
+    </div>
+  </section>
+  <script>
+    window.setInterval(() => {
+      window.location.reload();
+    }, 2000);
+  </script>
+</body>
+</html>

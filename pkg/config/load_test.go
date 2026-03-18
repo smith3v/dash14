@@ -35,6 +35,7 @@ sqlite:
 overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
 logging:
@@ -68,6 +69,9 @@ func TestLoad_ValidYAML(t *testing.T) {
 	}
 	if cfg.Overlay.LiveTemplatePath != "templates/live.html" {
 		t.Errorf("Overlay.LiveTemplatePath = %q, want %q", cfg.Overlay.LiveTemplatePath, "templates/live.html")
+	}
+	if cfg.Overlay.IntermissionTemplatePath != "templates/intermission.html" {
+		t.Errorf("Overlay.IntermissionTemplatePath = %q, want %q", cfg.Overlay.IntermissionTemplatePath, "templates/intermission.html")
 	}
 	if cfg.Overlay.OutputPath != "out/overlay.html" {
 		t.Errorf("Overlay.OutputPath = %q, want %q", cfg.Overlay.OutputPath, "out/overlay.html")

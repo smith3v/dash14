@@ -15,6 +15,7 @@ import (
 type OverlayRenderer interface {
 	RenderPlanned(vm overlay.PlannedViewModel) error
 	RenderLive(vm overlay.LiveViewModel) error
+	RenderIntermission(vm overlay.IntermissionViewModel) error
 }
 
 // Router dispatches Telegram updates to the correct handler.

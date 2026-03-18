@@ -428,15 +428,40 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 	if r.renderer == nil {
 		return nil
 	}
+	sets, err := r.games.ListSetsByGameID(game.ID)
+	if err != nil {
+		return err
+	}
+	homeTeam := overlay.TeamIdentity{
+		Name:      home.Name,
+		ShortName: home.ShortName,
+		LogoPath:  home.LogoPath,
+	}
+	guestTeam := overlay.TeamIdentity{
+		Name:      guest.Name,
+		ShortName: guest.ShortName,
+		LogoPath:  guest.LogoPath,
+	}
+	setScores := overlay.BuildSetScoreHistory(sets)
+
 	if game.Status == storage.GameStatusPlanned {
-		return r.renderer.RenderPlanned(overlay.PlannedViewModel{
+		if err := r.renderer.RenderPlanned(overlay.PlannedViewModel{
 			HomeTeamName:       home.Name,
 			HomeTeamShortName:  home.ShortName,
 			HomeTeamLogoPath:   home.LogoPath,
 			GuestTeamName:      guest.Name,
 			GuestTeamShortName: guest.ShortName,
 			GuestTeamLogoPath:  guest.LogoPath,
-		})
+		}); err != nil {
+			return err
+		}
+		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+			homeTeam,
+			guestTeam,
+			game.HomeSetsWon,
+			game.GuestSetsWon,
+			setScores,
+		))
 	}
 
 	homeScore := 0
@@ -445,46 +470,25 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 		homeScore = activeSet.HomeScore
 		guestScore = activeSet.GuestScore
 	}
-	leftName := home.Name
-	leftLabel := "Home Team"
-	rightName := guest.Name
-	rightLabel := "Guest Team"
-	leftScore := homeScore
-	rightScore := guestScore
-	leftSets := game.HomeSetsWon
-	rightSets := game.GuestSetsWon
-	if game.HomeTeamSide == "right" {
-		leftName = guest.Name
-		leftLabel = "Guest Team"
-		rightName = home.Name
-		rightLabel = "Home Team"
-		leftScore = guestScore
-		rightScore = homeScore
-		leftSets = game.GuestSetsWon
-		rightSets = game.HomeSetsWon
+	if err := r.renderer.RenderLive(overlay.BuildLiveViewModel(
+		homeTeam,
+		guestTeam,
+		game.HomeTeamSide,
+		homeScore,
+		guestScore,
+		game.HomeSetsWon,
+		game.GuestSetsWon,
+		game.CurrentSetNumber,
+	)); err != nil {
+		return err
 	}
-
-	return r.renderer.RenderLive(overlay.LiveViewModel{
-		HomeTeamName:       home.Name,
-		HomeTeamShortName:  home.ShortName,
-		HomeTeamLogoPath:   home.LogoPath,
-		GuestTeamName:      guest.Name,
-		GuestTeamShortName: guest.ShortName,
-		GuestTeamLogoPath:  guest.LogoPath,
-		HomeScore:          homeScore,
-		GuestScore:         guestScore,
-		HomeSetsWon:        game.HomeSetsWon,
-		GuestSetsWon:       game.GuestSetsWon,
-		CurrentSetNumber:   game.CurrentSetNumber,
-		LeftTeamName:       leftName,
-		LeftTeamLabel:      leftLabel,
-		RightTeamName:      rightName,
-		RightTeamLabel:     rightLabel,
-		LeftScore:          leftScore,
-		RightScore:         rightScore,
-		LeftSetsWon:        leftSets,
-		RightSetsWon:       rightSets,
-	})
+	return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+		homeTeam,
+		guestTeam,
+		game.HomeSetsWon,
+		game.GuestSetsWon,
+		setScores,
+	))
 }
 
 func formatBroadcastScore(game *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {

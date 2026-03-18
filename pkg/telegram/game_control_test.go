@@ -249,6 +249,16 @@ func TestGameControlSet3FinishCreatesSet4(t *testing.T) {
 	if len(renderer.live) == 0 {
 		t.Fatal("expected live overlay rendering after set finish")
 	}
+	if len(renderer.intermission) == 0 {
+		t.Fatal("expected intermission overlay rendering after set finish")
+	}
+	last := renderer.intermission[len(renderer.intermission)-1]
+	if len(last.SetScores) != 1 {
+		t.Fatalf("expected only finished sets in intermission, got %d entries", len(last.SetScores))
+	}
+	if last.SetScores[0].SetNumber != 3 || last.SetScores[0].HomeScore != 25 || last.SetScores[0].GuestScore != 10 {
+		t.Fatalf("unexpected intermission set history: %+v", last.SetScores)
+	}
 }
 
 func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {

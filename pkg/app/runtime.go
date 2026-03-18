@@ -147,6 +147,11 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.LiveTemplatePath); err != nil {
 		return err
 	}
+	if cfg.IntermissionTemplatePath != "" {
+		if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -167,16 +172,40 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 	if err != nil {
 		return err
 	}
+	sets, err := games.ListSetsByGameID(current.ID)
+	if err != nil {
+		return err
+	}
+	homeTeam := overlay.TeamIdentity{
+		Name:      home.Name,
+		ShortName: home.ShortName,
+		LogoPath:  home.LogoPath,
+	}
+	guestTeam := overlay.TeamIdentity{
+		Name:      guest.Name,
+		ShortName: guest.ShortName,
+		LogoPath:  guest.LogoPath,
+	}
+	setScores := overlay.BuildSetScoreHistory(sets)
 
 	if current.Status == storage.GameStatusPlanned {
-		return renderer.RenderPlanned(overlay.PlannedViewModel{
+		if err := renderer.RenderPlanned(overlay.PlannedViewModel{
 			HomeTeamName:       home.Name,
 			HomeTeamShortName:  home.ShortName,
 			HomeTeamLogoPath:   home.LogoPath,
 			GuestTeamName:      guest.Name,
 			GuestTeamShortName: guest.ShortName,
 			GuestTeamLogoPath:  guest.LogoPath,
-		})
+		}); err != nil {
+			return err
+		}
+		return renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+			homeTeam,
+			guestTeam,
+			current.HomeSetsWon,
+			current.GuestSetsWon,
+			setScores,
+		))
 	}
 
 	set, err := games.GetActiveSet(current.ID)
@@ -189,44 +218,23 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 
 	homeScore := set.HomeScore
 	guestScore := set.GuestScore
-	leftName := home.Name
-	leftLabel := "Home Team"
-	rightName := guest.Name
-	rightLabel := "Guest Team"
-	leftScore := homeScore
-	rightScore := guestScore
-	leftSets := current.HomeSetsWon
-	rightSets := current.GuestSetsWon
-	if current.HomeTeamSide == "right" {
-		leftName = guest.Name
-		leftLabel = "Guest Team"
-		rightName = home.Name
-		rightLabel = "Home Team"
-		leftScore = guestScore
-		rightScore = homeScore
-		leftSets = current.GuestSetsWon
-		rightSets = current.HomeSetsWon
+	if err := renderer.RenderLive(overlay.BuildLiveViewModel(
+		homeTeam,
+		guestTeam,
+		current.HomeTeamSide,
+		homeScore,
+		guestScore,
+		current.HomeSetsWon,
+		current.GuestSetsWon,
+		current.CurrentSetNumber,
+	)); err != nil {
+		return err
 	}
-
-	return renderer.RenderLive(overlay.LiveViewModel{
-		HomeTeamName:       home.Name,
-		HomeTeamShortName:  home.ShortName,
-		HomeTeamLogoPath:   home.LogoPath,
-		GuestTeamName:      guest.Name,
-		GuestTeamShortName: guest.ShortName,
-		GuestTeamLogoPath:  guest.LogoPath,
-		HomeScore:          homeScore,
-		GuestScore:         guestScore,
-		HomeSetsWon:        current.HomeSetsWon,
-		GuestSetsWon:       current.GuestSetsWon,
-		CurrentSetNumber:   current.CurrentSetNumber,
-		LeftTeamName:       leftName,
-		LeftTeamLabel:      leftLabel,
-		RightTeamName:      rightName,
-		RightTeamLabel:     rightLabel,
-		LeftScore:          leftScore,
-		RightScore:         rightScore,
-		LeftSetsWon:        leftSets,
-		RightSetsWon:       rightSets,
-	})
+	return renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+		homeTeam,
+		guestTeam,
+		current.HomeSetsWon,
+		current.GuestSetsWon,
+		setScores,
+	))
 }
