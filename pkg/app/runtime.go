@@ -147,8 +147,10 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.LiveTemplatePath); err != nil {
 		return err
 	}
-	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
-		return err
+	if cfg.IntermissionTemplatePath != "" {
+		if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -184,14 +186,7 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 		ShortName: guest.ShortName,
 		LogoPath:  guest.LogoPath,
 	}
-	setScores := make([]overlay.SetScoreViewModel, 0, len(sets))
-	for _, set := range sets {
-		setScores = append(setScores, overlay.SetScoreViewModel{
-			SetNumber:  set.SetNumber,
-			HomeScore:  set.HomeScore,
-			GuestScore: set.GuestScore,
-		})
-	}
+	setScores := overlay.BuildSetScoreHistory(sets)
 
 	if current.Status == storage.GameStatusPlanned {
 		if err := renderer.RenderPlanned(overlay.PlannedViewModel{

@@ -442,14 +442,7 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 		ShortName: guest.ShortName,
 		LogoPath:  guest.LogoPath,
 	}
-	setScores := make([]overlay.SetScoreViewModel, 0, len(sets))
-	for _, set := range sets {
-		setScores = append(setScores, overlay.SetScoreViewModel{
-			SetNumber:  set.SetNumber,
-			HomeScore:  set.HomeScore,
-			GuestScore: set.GuestScore,
-		})
-	}
+	setScores := overlay.BuildSetScoreHistory(sets)
 
 	if game.Status == storage.GameStatusPlanned {
 		if err := r.renderer.RenderPlanned(overlay.PlannedViewModel{

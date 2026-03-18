@@ -55,6 +55,9 @@ func (r *Renderer) RenderLive(vm LiveViewModel) error {
 // RenderIntermission parses the intermission template and renders it to the
 // derived intermission output path.
 func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
+	if r.cfg.IntermissionTemplatePath == "" {
+		return nil
+	}
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}

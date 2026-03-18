@@ -1,5 +1,7 @@
 package overlay
 
+import "github.com/smith3v/dash14/pkg/storage"
+
 // BuildLiveViewModel converts game state into the live overlay view model.
 func BuildLiveViewModel(
 	home TeamIdentity,
@@ -73,4 +75,21 @@ func BuildIntermissionViewModel(
 		GuestSetsWon:       guestSetsWon,
 		SetScores:          sets,
 	}
+}
+
+// BuildSetScoreHistory converts persisted sets into the intermission-visible
+// score history. Unstarted placeholder sets are excluded.
+func BuildSetScoreHistory(sets []storage.GameSet) []SetScoreViewModel {
+	history := make([]SetScoreViewModel, 0, len(sets))
+	for _, set := range sets {
+		if !set.IsFinished && set.HomeScore == 0 && set.GuestScore == 0 {
+			continue
+		}
+		history = append(history, SetScoreViewModel{
+			SetNumber:  set.SetNumber,
+			HomeScore:  set.HomeScore,
+			GuestScore: set.GuestScore,
+		})
+	}
+	return history
 }
