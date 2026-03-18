@@ -156,7 +156,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			return
 		}
 		activeSet = newSet
-		broadcastText = fmt.Sprintf("Game started: %s vs %s", home.Name, guest.Name)
+		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
 
 	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
 		if game.Status != storage.GameStatusInProgress || activeSet == nil {
@@ -237,7 +237,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			activeSet = nil
 		}
 		broadcastText = fmt.Sprintf(
-			"Set %d finished: %s %d-%d %s | Sets %d-%d",
+			"Set %d finished\n🏠 %s <b>%d-%d</b> ✈️ %s\nGame score: %d-%d",
 			setState.SetNumber,
 			home.Name,
 			setState.HomeScore,
@@ -353,12 +353,12 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 	if finishable {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Is set finished?", CallbackData: "game:set:finish"},
+			{Text: "Finish the set", CallbackData: "game:set:finish"},
 		})
 	}
 	if game2.IsGameFinishEligible(toGameState(game)) {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Is game finished?", CallbackData: "game:game:finish"},
+			{Text: "Finish the game", CallbackData: "game:game:finish"},
 		})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{
@@ -489,12 +489,12 @@ func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, ac
 
 func formatBroadcastScore(game *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {
 	return fmt.Sprintf(
-		"Set %d: %s %d-%d %s | Sets %d-%d",
-		game.CurrentSetNumber,
+		"🏠 %s <b>%d-%d</b> ✈️ %s\n<i>Current set: %d | Game score: %d-%d</i>",
 		home.Name,
 		set.HomeScore,
 		set.GuestScore,
 		guest.Name,
+		game.CurrentSetNumber,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
 	)
