@@ -87,6 +87,7 @@ logging:
 ## Deployment
 
 For Docker Compose, `nginx`, and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
+The tracked `docker-compose.yml` is deployment-oriented and reads the app image tag from a local `.env` file; local source builds use `docker-compose.dev.yml`.
 
 ## Team Import File Format
 
