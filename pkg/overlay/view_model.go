@@ -1,6 +1,20 @@
 // Package overlay provides template rendering for the OBS browser source overlay.
 package overlay
 
+// TeamIdentity holds the team fields reused across overlay view models.
+type TeamIdentity struct {
+	Name      string
+	ShortName string
+	LogoPath  string
+}
+
+// SetScoreViewModel holds the score line for a single set.
+type SetScoreViewModel struct {
+	SetNumber  int
+	HomeScore  int
+	GuestScore int
+}
+
 // PlannedViewModel holds the presentation data for a game in the planned state.
 // It is passed to the planned HTML template for rendering.
 type PlannedViewModel struct {
@@ -92,4 +106,37 @@ type LiveViewModel struct {
 
 	// RightSetsWon is the number of sets won by the right-side team.
 	RightSetsWon int
+}
+
+// IntermissionViewModel holds the presentation data for the scoreboard shown
+// before the game and between sets.
+type IntermissionViewModel struct {
+	// HomeTeamName is the full name of the home team.
+	HomeTeamName string
+
+	// HomeTeamShortName is the abbreviated name of the home team.
+	HomeTeamShortName string
+
+	// HomeTeamLogoPath is the filesystem path to the home team logo image.
+	// Empty string means no logo is available.
+	HomeTeamLogoPath string
+
+	// GuestTeamName is the full name of the guest team.
+	GuestTeamName string
+
+	// GuestTeamShortName is the abbreviated name of the guest team.
+	GuestTeamShortName string
+
+	// GuestTeamLogoPath is the filesystem path to the guest team logo image.
+	// Empty string means no logo is available.
+	GuestTeamLogoPath string
+
+	// HomeSetsWon is the total number of sets won by the home team.
+	HomeSetsWon int
+
+	// GuestSetsWon is the total number of sets won by the guest team.
+	GuestSetsWon int
+
+	// SetScores contains all played sets, including the active unfinished set.
+	SetScores []SetScoreViewModel
 }

@@ -174,6 +174,74 @@ func TestRenderLive(t *testing.T) {
 	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-live")
 }
 
+func TestRenderIntermission(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
+	intermissionPath := filepath.Join(outDir, "intermission.html")
+	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-break")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-break")
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
+		OutputPath:          outPath,
+		LogoDir:             logoDir,
+	}
+
+	r := NewRenderer(cfg)
+
+	vm := IntermissionViewModel{
+		HomeTeamName:       "Kroefi HS 1",
+		HomeTeamShortName:  "DYN",
+		HomeTeamLogoPath:   "home.png",
+		GuestTeamName:      "Spaarnestad HS 14",
+		GuestTeamShortName: "AUR",
+		GuestTeamLogoPath:  "guest.png",
+		HomeSetsWon:        2,
+		GuestSetsWon:       1,
+		SetScores: []SetScoreViewModel{
+			{SetNumber: 1, HomeScore: 25, GuestScore: 19},
+			{SetNumber: 2, HomeScore: 17, GuestScore: 25},
+			{SetNumber: 3, HomeScore: 14, GuestScore: 11},
+		},
+	}
+
+	if err := r.RenderIntermission(vm); err != nil {
+		t.Fatalf("RenderIntermission returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(intermissionPath)
+	if err != nil {
+		t.Fatalf("intermission output file not readable: %v", err)
+	}
+
+	got := string(content)
+	for _, want := range []string{
+		"Kroefi HS 1",
+		"Spaarnestad HS 14",
+		`src="home.png"`,
+		`src="guest.png"`,
+		"Game Score",
+		"Set 1",
+		"25",
+		"19",
+		"Set 3",
+		"14",
+		"11",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output does not contain %q", want)
+		}
+	}
+
+	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-break")
+	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-break")
+}
+
 func TestRenderAtomicReplacement(t *testing.T) {
 	tmpDir := t.TempDir()
 	outPath := filepath.Join(tmpDir, "overlay.html")

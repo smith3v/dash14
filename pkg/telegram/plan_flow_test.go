@@ -21,8 +21,9 @@ type planTestStore struct {
 }
 
 type fakeOverlayRenderer struct {
-	planned []overlay.PlannedViewModel
-	live    []overlay.LiveViewModel
+	planned      []overlay.PlannedViewModel
+	live         []overlay.LiveViewModel
+	intermission []overlay.IntermissionViewModel
 }
 
 func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
@@ -32,6 +33,11 @@ func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
 
 func (f *fakeOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
 	f.live = append(f.live, vm)
+	return nil
+}
+
+func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewModel) error {
+	f.intermission = append(f.intermission, vm)
 	return nil
 }
 

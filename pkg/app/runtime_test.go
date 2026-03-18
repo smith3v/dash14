@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/smith3v/dash14/pkg/config"
@@ -74,11 +75,15 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	outputPath := filepath.Join(dir, "overlay", "current.html")
 	plannedTpl := filepath.Join(dir, "planned.tmpl")
 	liveTpl := filepath.Join(dir, "live.tmpl")
+	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
 	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}} vs {{.GuestTeamName}}"), 0o644); err != nil {
 		t.Fatalf("write planned template: %v", err)
 	}
 	if err := os.WriteFile(liveTpl, []byte("live {{.LeftTeamName}} {{.LeftScore}}"), 0o644); err != nil {
 		t.Fatalf("write live template: %v", err)
+	}
+	if err := os.WriteFile(intermissionTpl, []byte("intermission {{.HomeSetsWon}}-{{.GuestSetsWon}} {{range .SetScores}}set{{.SetNumber}} {{.HomeScore}}-{{.GuestScore}} {{end}}"), 0o644); err != nil {
+		t.Fatalf("write intermission template: %v", err)
 	}
 
 	db, err := storage.Open(dbPath)
@@ -126,6 +131,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 
 	telegramStarted := false
 	sawRenderedOverlay := false
+	sawRenderedIntermission := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
 	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
@@ -133,6 +139,10 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 			telegramStarted = true
 			if _, err := os.Stat(outputPath); err == nil {
 				sawRenderedOverlay = true
+			}
+			intermissionPath := filepath.Join(filepath.Dir(outputPath), "intermission.html")
+			if data, err := os.ReadFile(intermissionPath); err == nil && strings.Contains(string(data), "intermission 0-0") {
+				sawRenderedIntermission = true
 			}
 		}, nil
 	}
@@ -146,5 +156,8 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	}
 	if !sawRenderedOverlay {
 		t.Fatal("expected overlay to be rendered before telegram start")
+	}
+	if !sawRenderedIntermission {
+		t.Fatal("expected intermission overlay to be rendered before telegram start")
 	}
 }

@@ -35,7 +35,7 @@ func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
 	if err != nil {
 		return fmt.Errorf("overlay: parse planned template: %w", err)
 	}
-	return r.renderToOutput(tmpl, vm)
+	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
 }
 
 // RenderLive parses the live template and renders it with vm to the configured
@@ -49,13 +49,27 @@ func (r *Renderer) RenderLive(vm LiveViewModel) error {
 	if err != nil {
 		return fmt.Errorf("overlay: parse live template: %w", err)
 	}
-	return r.renderToOutput(tmpl, vm)
+	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
 }
 
-// renderToOutput executes tmpl with data and writes the result atomically to
-// r.cfg.OutputPath.
-func (r *Renderer) renderToOutput(tmpl *template.Template, data any) error {
-	outDir := filepath.Dir(r.cfg.OutputPath)
+// RenderIntermission parses the intermission template and renders it to the
+// derived intermission output path.
+func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+
+	tmpl, err := template.ParseFiles(r.intermissionTemplatePath())
+	if err != nil {
+		return fmt.Errorf("overlay: parse intermission template: %w", err)
+	}
+	return r.renderToPath(tmpl, vm, r.intermissionOutputPath())
+}
+
+// renderToPath executes tmpl with data and writes the result atomically to
+// outputPath.
+func (r *Renderer) renderToPath(tmpl *template.Template, data any, outputPath string) error {
+	outDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("overlay: create output directory: %w", err)
 	}
@@ -83,12 +97,20 @@ func (r *Renderer) renderToOutput(tmpl *template.Template, data any) error {
 		return fmt.Errorf("overlay: close temp file: %w", err)
 	}
 
-	if err = os.Rename(tmpName, r.cfg.OutputPath); err != nil {
+	if err = os.Rename(tmpName, outputPath); err != nil {
 		return fmt.Errorf("overlay: rename temp file to output: %w", err)
 	}
 
 	ok = true
 	return nil
+}
+
+func (r *Renderer) intermissionTemplatePath() string {
+	return filepath.Join(filepath.Dir(r.cfg.LiveTemplatePath), "intermission.html.tmpl")
+}
+
+func (r *Renderer) intermissionOutputPath() string {
+	return filepath.Join(filepath.Dir(r.cfg.OutputPath), "intermission.html")
 }
 
 func (r *Renderer) publishLogos(homeLogoPath, guestLogoPath *string) error {

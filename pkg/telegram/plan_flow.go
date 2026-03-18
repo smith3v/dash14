@@ -423,6 +423,29 @@ func (r *Router) finalizePlannedGame(
 		})
 		return
 	}
+	if err := r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+		overlay.TeamIdentity{
+			Name:      state.HomeTeam.Name,
+			ShortName: state.HomeTeam.ShortName,
+			LogoPath:  state.HomeTeam.LogoPath,
+		},
+		overlay.TeamIdentity{
+			Name:      guestTeam.Name,
+			ShortName: guestTeam.ShortName,
+			LogoPath:  guestTeam.LogoPath,
+		},
+		0,
+		0,
+		nil,
+	)); err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: render intermission overlay failed",
+			"user_id", userID, "game_id", game.ID, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Game was planned, but intermission overlay rendering failed. Please check logs.",
+		})
+		return
+	}
 
 	r.plans.Delete(userID)
 	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
