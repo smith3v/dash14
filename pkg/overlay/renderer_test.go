@@ -33,10 +33,11 @@ func TestRenderPlanned(t *testing.T) {
 	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-logo")
 
 	cfg := config.OverlayConfig{
-		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
-		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
-		OutputPath:          outPath,
-		LogoDir:             logoDir,
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
 	}
 
 	r := NewRenderer(cfg)
@@ -102,10 +103,11 @@ func TestRenderLive(t *testing.T) {
 	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-live")
 
 	cfg := config.OverlayConfig{
-		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
-		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
-		OutputPath:          outPath,
-		LogoDir:             logoDir,
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
 	}
 
 	r := NewRenderer(cfg)
@@ -186,10 +188,11 @@ func TestRenderIntermission(t *testing.T) {
 	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-break")
 
 	cfg := config.OverlayConfig{
-		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
-		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
-		OutputPath:          outPath,
-		LogoDir:             logoDir,
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
 	}
 
 	r := NewRenderer(cfg)
@@ -254,9 +257,10 @@ func TestRenderAtomicReplacement(t *testing.T) {
 	}
 
 	cfg := config.OverlayConfig{
-		PlannedTemplatePath: filepath.Join(tmplDir, "planned.html.tmpl"),
-		LiveTemplatePath:    filepath.Join(tmplDir, "live.html.tmpl"),
-		OutputPath:          outPath,
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
 	}
 
 	r := NewRenderer(cfg)

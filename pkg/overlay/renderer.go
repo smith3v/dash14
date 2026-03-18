@@ -59,7 +59,7 @@ func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
 		return err
 	}
 
-	tmpl, err := template.ParseFiles(r.intermissionTemplatePath())
+	tmpl, err := template.ParseFiles(r.cfg.IntermissionTemplatePath)
 	if err != nil {
 		return fmt.Errorf("overlay: parse intermission template: %w", err)
 	}
@@ -103,10 +103,6 @@ func (r *Renderer) renderToPath(tmpl *template.Template, data any, outputPath st
 
 	ok = true
 	return nil
-}
-
-func (r *Renderer) intermissionTemplatePath() string {
-	return filepath.Join(filepath.Dir(r.cfg.LiveTemplatePath), "intermission.html.tmpl")
 }
 
 func (r *Renderer) intermissionOutputPath() string {

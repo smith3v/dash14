@@ -122,10 +122,11 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
-			PlannedTemplatePath: plannedTpl,
-			LiveTemplatePath:    liveTpl,
-			OutputPath:          outputPath,
-			LogoDir:             filepath.Join(dir, "logos"),
+			PlannedTemplatePath:      plannedTpl,
+			LiveTemplatePath:         liveTpl,
+			IntermissionTemplatePath: intermissionTpl,
+			OutputPath:               outputPath,
+			LogoDir:                  filepath.Join(dir, "logos"),
 		},
 	}
 

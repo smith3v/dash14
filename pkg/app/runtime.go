@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/importer"
@@ -148,7 +147,7 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.LiveTemplatePath); err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(cfg.LiveTemplatePath), "intermission.html.tmpl")); err != nil {
+	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
 		return err
 	}
 	return nil

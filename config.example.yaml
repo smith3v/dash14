@@ -22,6 +22,10 @@ overlay:
   # progress.
   live_template_path: "templates/live.html.tmpl"
 
+  # intermission_template_path is the HTML template rendered for the
+  # standalone intermission scoreboard page.
+  intermission_template_path: "templates/intermission.html.tmpl"
+
   # output_path is where the rendered overlay HTML file is written.
   # Point your OBS Browser Source at this file.
   output_path: "runtime/out/overlay.html"
