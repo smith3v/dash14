@@ -52,6 +52,7 @@ func (imp *Importer) ImportTeams(yamlPath string) error {
 			Key:       rec.Key,
 			Name:      rec.Name,
 			ShortName: rec.ShortName,
+			Hometown:  rec.Hometown,
 			LogoPath:  logoPath,
 			Aliases:   rec.Aliases,
 		}

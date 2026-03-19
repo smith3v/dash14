@@ -147,6 +147,7 @@ func TestImportTeams_LogoCopiedAndTeamUpserted(t *testing.T) {
 	yamlContent := `- key: lokomotiv
   name: Lokomotiv Novosibirsk
   short_name: LOK
+  hometown: Novosibirsk
   logo: ` + srcPath + `
   aliases:
     - Loko
@@ -174,6 +175,9 @@ func TestImportTeams_LogoCopiedAndTeamUpserted(t *testing.T) {
 	}
 	if team.ShortName != "LOK" {
 		t.Errorf("ShortName: got %q, want %q", team.ShortName, "LOK")
+	}
+	if team.Hometown != "Novosibirsk" {
+		t.Errorf("Hometown: got %q, want %q", team.Hometown, "Novosibirsk")
 	}
 
 	// Verify LogoPath is relative (filename only).
@@ -205,6 +209,7 @@ func TestImportTeams_ReImportUpdatesTeam(t *testing.T) {
 	yaml1 := `- key: zenit
   name: Zenit Saint Petersburg
   short_name: ZEN
+  hometown: Saint Petersburg
   logo: ` + logo1 + `
   aliases:
     - Zenit SPb
@@ -233,6 +238,7 @@ func TestImportTeams_ReImportUpdatesTeam(t *testing.T) {
 	yaml2 := `- key: zenit
   name: Zenit Kazan
   short_name: ZKZ
+  hometown: Kazan
   logo: ` + logo2 + `
   aliases:
     - Kazan Zenit
@@ -263,6 +269,9 @@ func TestImportTeams_ReImportUpdatesTeam(t *testing.T) {
 	if second.ShortName != "ZKZ" {
 		t.Errorf("ShortName after re-import: got %q, want %q", second.ShortName, "ZKZ")
 	}
+	if second.Hometown != "Kazan" {
+		t.Errorf("Hometown after re-import: got %q, want %q", second.Hometown, "Kazan")
+	}
 
 	// Logo filename is stable — the extension is preserved but the base name is
 	// always {teamKey}, so both imports produce the same dest filename.
@@ -281,6 +290,7 @@ func TestImportTeams_NoLogoField(t *testing.T) {
 	yaml := `- key: minimal-team
   name: Minimal Team
   short_name: MIN
+  hometown: Minimal City
 `
 	yamlPath := filepath.Join(yamlDir, "teams.yaml")
 	if err := os.WriteFile(yamlPath, []byte(yaml), 0o644); err != nil {
@@ -301,5 +311,8 @@ func TestImportTeams_NoLogoField(t *testing.T) {
 	}
 	if team.LogoPath != "" {
 		t.Errorf("LogoPath: got %q, want empty string", team.LogoPath)
+	}
+	if team.Hometown != "Minimal City" {
+		t.Errorf("Hometown: got %q, want %q", team.Hometown, "Minimal City")
 	}
 }

@@ -35,6 +35,7 @@ func TestTeamUpsertByKey(t *testing.T) {
 		Key:       "team-alpha",
 		Name:      "Alpha FC",
 		ShortName: "ALF",
+		Hometown:  "Old Town",
 		LogoPath:  "logos/alpha.png",
 		Aliases:   []string{"Alpha", "The Alphas"},
 	}
@@ -52,6 +53,7 @@ func TestTeamUpsertByKey(t *testing.T) {
 		Key:       "team-alpha",
 		Name:      "Alpha Volleyball Club",
 		ShortName: "AVC",
+		Hometown:  "New Town",
 		LogoPath:  "logos/alpha_v2.png",
 		Aliases:   []string{"Alpha", "AVC Stars"},
 	}
@@ -72,6 +74,9 @@ func TestTeamUpsertByKey(t *testing.T) {
 	}
 	if got.ShortName != "AVC" {
 		t.Errorf("ShortName: got %q, want %q", got.ShortName, "AVC")
+	}
+	if got.Hometown != "New Town" {
+		t.Errorf("Hometown: got %q, want %q", got.Hometown, "New Town")
 	}
 	if got.LogoPath != "logos/alpha_v2.png" {
 		t.Errorf("LogoPath: got %q, want %q", got.LogoPath, "logos/alpha_v2.png")
@@ -96,6 +101,7 @@ func TestTeamAliasPersistence(t *testing.T) {
 		Key:       "team-tbilisi",
 		Name:      "Tbilisi Volleyballers",
 		ShortName: "TBL",
+		Hometown:  "Tbilisi",
 		Aliases:   want,
 	}
 
@@ -110,6 +116,9 @@ func TestTeamAliasPersistence(t *testing.T) {
 
 	if len(got.Aliases) != len(want) {
 		t.Fatalf("Aliases length: got %d, want %d (got=%v)", len(got.Aliases), len(want), got.Aliases)
+	}
+	if got.Hometown != "Tbilisi" {
+		t.Fatalf("Hometown: got %q, want %q", got.Hometown, "Tbilisi")
 	}
 	for i := range want {
 		if got.Aliases[i] != want[i] {

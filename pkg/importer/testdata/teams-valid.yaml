@@ -1,6 +1,7 @@
 - key: lokomotiv
   name: Lokomotiv Novosibirsk
   short_name: LOK
+  hometown: Novosibirsk
   logo: logos/lokomotiv.png
   aliases:
     - Loko
@@ -11,6 +12,7 @@
 - key: zenit
   name: Zenit Saint Petersburg
   short_name: ZEN
+  hometown: Saint Petersburg
   logo: logos/zenit.png
   aliases:
     - Zenit SPb

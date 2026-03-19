@@ -48,9 +48,11 @@ func TestRenderPlanned(t *testing.T) {
 	vm := PlannedViewModel{
 		HomeTeamName:       homeLongName,
 		HomeTeamShortName:  "DYN",
+		HomeTeamHometown:   "Assendelft",
 		HomeTeamLogoPath:   "home.png",
 		GuestTeamName:      guestLongName,
 		GuestTeamShortName: "AUR",
+		GuestTeamHometown:  "Haarlem",
 		GuestTeamLogoPath:  "guest.png",
 	}
 
@@ -71,8 +73,8 @@ func TestRenderPlanned(t *testing.T) {
 	}{
 		{"home team name", homeLongName},
 		{"guest team name", guestLongName},
-		{"home short name", "DYN"},
-		{"guest short name", "AUR"},
+		{"home hometown", "Assendelft"},
+		{"guest hometown", "Haarlem"},
 		{"home logo src", `src="home.png"`},
 		{"guest logo src", `src="guest.png"`},
 		{"upcoming label", "Upcoming"},
@@ -86,6 +88,11 @@ func TestRenderPlanned(t *testing.T) {
 				t.Errorf("output does not contain %q", tc.want)
 			}
 		})
+	}
+	for _, unwanted := range []string{"DYN", "AUR"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("output unexpectedly contains short name %q", unwanted)
+		}
 	}
 
 	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-logo")
@@ -200,9 +207,11 @@ func TestRenderIntermission(t *testing.T) {
 	vm := IntermissionViewModel{
 		HomeTeamName:       "Kroefi HS 1",
 		HomeTeamShortName:  "DYN",
+		HomeTeamHometown:   "Assendelft",
 		HomeTeamLogoPath:   "home.png",
 		GuestTeamName:      "Spaarnestad HS 14",
 		GuestTeamShortName: "AUR",
+		GuestTeamHometown:  "Haarlem",
 		GuestTeamLogoPath:  "guest.png",
 		HomeSetsWon:        2,
 		GuestSetsWon:       1,
@@ -226,6 +235,8 @@ func TestRenderIntermission(t *testing.T) {
 	for _, want := range []string{
 		"Kroefi HS 1",
 		"Spaarnestad HS 14",
+		"Assendelft",
+		"Haarlem",
 		`src="home.png"`,
 		`src="guest.png"`,
 		"Game Score",
@@ -240,9 +251,78 @@ func TestRenderIntermission(t *testing.T) {
 			t.Errorf("output does not contain %q", want)
 		}
 	}
+	for _, unwanted := range []string{"DYN", "AUR"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("output unexpectedly contains short name %q", unwanted)
+		}
+	}
 
 	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-break")
 	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-break")
+}
+
+func TestRenderPlannedOmitsThirdLineWhenHometownMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+	tmplDir := templateDir(t)
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
+	}
+
+	r := NewRenderer(cfg)
+
+	if err := r.RenderPlanned(PlannedViewModel{
+		HomeTeamName:  "Home Team",
+		GuestTeamName: "Guest Team",
+	}); err != nil {
+		t.Fatalf("RenderPlanned returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable: %v", err)
+	}
+
+	if strings.Contains(string(content), `class="third-line"`) {
+		t.Fatal("planned output unexpectedly rendered a third line with empty hometowns")
+	}
+}
+
+func TestRenderIntermissionOmitsThirdLineWhenHometownMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	outPath := filepath.Join(outDir, "overlay.html")
+	intermissionPath := filepath.Join(outDir, "intermission.html")
+	tmplDir := templateDir(t)
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		OutputPath:               outPath,
+	}
+
+	r := NewRenderer(cfg)
+
+	if err := r.RenderIntermission(IntermissionViewModel{
+		HomeTeamName:  "Home Team",
+		GuestTeamName: "Guest Team",
+	}); err != nil {
+		t.Fatalf("RenderIntermission returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(intermissionPath)
+	if err != nil {
+		t.Fatalf("intermission output file not readable: %v", err)
+	}
+
+	if strings.Contains(string(content), `class="third-line"`) {
+		t.Fatal("intermission output unexpectedly rendered a third line with empty hometowns")
+	}
 }
 
 func TestRenderAtomicReplacement(t *testing.T) {

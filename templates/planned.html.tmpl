@@ -100,7 +100,7 @@
       text-overflow: ellipsis;
     }
 
-    .short-name {
+    .third-line {
       font-size: 20px;
       font-weight: 700;
       letter-spacing: 0.1em;
@@ -173,7 +173,7 @@
       <div class="meta">
         <div class="role">Home Team</div>
         <div class="name">{{.HomeTeamName}}</div>
-        {{if .HomeTeamShortName}}<div class="short-name">{{.HomeTeamShortName}}</div>{{end}}
+        {{if .HomeTeamHometown}}<div class="third-line">{{.HomeTeamHometown}}</div>{{end}}
       </div>
     </article>
 
@@ -189,7 +189,7 @@
       <div class="meta">
         <div class="role">Guest Team</div>
         <div class="name">{{.GuestTeamName}}</div>
-        {{if .GuestTeamShortName}}<div class="short-name">{{.GuestTeamShortName}}</div>{{end}}
+        {{if .GuestTeamHometown}}<div class="third-line">{{.GuestTeamHometown}}</div>{{end}}
       </div>
       {{if .GuestTeamLogoPath}}
       <img class="logo" src="{{.GuestTeamLogoPath}}" alt="{{.GuestTeamName}} logo">

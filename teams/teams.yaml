@@ -1,6 +1,7 @@
 - key: vch-hs-2
   name: VCH HS 2
   short_name: VCH
+  hometown: Hoofddorp
   logo: teams/logos/vch-hs-2.png
   aliases:
     - VCH HS 2
@@ -8,6 +9,7 @@
 - key: spaarnestad-hs-14
   name: Spaarnestad HS 14
   short_name: Spaarnestad
+  hometown: Haarlem
   logo: teams/logos/spaarnestad-hs-14.png
   aliases:
     - Spaarnestad HS 14
@@ -15,6 +17,7 @@
 - key: zaanstad-hs-8
   name: Zaanstad HS 8
   short_name: Zaanstad
+  hometown: Koog aan de Zaan
   logo: teams/logos/zaanstad-hs-8.png
   aliases:
     - Zaanstad HS 8
@@ -22,6 +25,7 @@
 - key: vv-jonas-hs-6
   name: vv Jonas HS 6
   short_name: vv Jonas
+  hometown: Beverwijk
   logo: teams/logos/vv-jonas-hs-6.png
   aliases:
     - vv Jonas HS 6
@@ -29,6 +33,7 @@
 - key: kroefi-hs-1
   name: Kroefi HS 1
   short_name: Kroefi
+  hometown: Krommenie
   logo: teams/logos/kroefi-hs-1.png
   aliases:
     - Kroefi HS 1
@@ -36,6 +41,7 @@
 - key: spaarnestad-hs-13
   name: Spaarnestad HS 13
   short_name: Spaarnestad
+  hometown: Haarlem
   logo: teams/logos/spaarnestad-hs-13.png
   aliases:
     - Spaarnestad HS 13
@@ -43,6 +49,7 @@
 - key: vc-de-where-hs-6
   name: vc De Where HS 6
   short_name: vc De Where
+  hometown: Purmerend
   logo: teams/logos/vc-de-where-hs-6.png
   aliases:
     - vc De Where HS 6
@@ -50,6 +57,7 @@
 - key: move-hs-4
   name: MOVE HS 4
   short_name: MOVE
+  hometown: Edam
   logo: teams/logos/move-hs-4.png
   aliases:
     - MOVE HS 4
@@ -57,6 +65,7 @@
 - key: croonenburg-hs-3
   name: Croonenburg HS 3
   short_name: Croonenburg
+  hometown: Castricum
   logo: teams/logos/croonenburg-hs-3.png
   aliases:
     - Croonenburg HS 3

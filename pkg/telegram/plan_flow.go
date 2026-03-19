@@ -409,9 +409,11 @@ func (r *Router) finalizePlannedGame(
 	vm := overlay.PlannedViewModel{
 		HomeTeamName:       state.HomeTeam.Name,
 		HomeTeamShortName:  state.HomeTeam.ShortName,
+		HomeTeamHometown:   state.HomeTeam.Hometown,
 		HomeTeamLogoPath:   state.HomeTeam.LogoPath,
 		GuestTeamName:      guestTeam.Name,
 		GuestTeamShortName: guestTeam.ShortName,
+		GuestTeamHometown:  guestTeam.Hometown,
 		GuestTeamLogoPath:  guestTeam.LogoPath,
 	}
 	if err := r.renderer.RenderPlanned(vm); err != nil {
@@ -427,11 +429,13 @@ func (r *Router) finalizePlannedGame(
 		overlay.TeamIdentity{
 			Name:      state.HomeTeam.Name,
 			ShortName: state.HomeTeam.ShortName,
+			Hometown:  state.HomeTeam.Hometown,
 			LogoPath:  state.HomeTeam.LogoPath,
 		},
 		overlay.TeamIdentity{
 			Name:      guestTeam.Name,
 			ShortName: guestTeam.ShortName,
+			Hometown:  guestTeam.Hometown,
 			LogoPath:  guestTeam.LogoPath,
 		},
 		0,
