@@ -5,6 +5,7 @@ package overlay
 type TeamIdentity struct {
 	Name      string
 	ShortName string
+	Hometown  string
 	LogoPath  string
 }
 
@@ -24,6 +25,9 @@ type PlannedViewModel struct {
 	// HomeTeamShortName is the abbreviated name of the home team.
 	HomeTeamShortName string
 
+	// HomeTeamHometown is the display hometown of the home team.
+	HomeTeamHometown string
+
 	// HomeTeamLogoPath is the filesystem path to the home team logo image.
 	// Empty string means no logo is available.
 	HomeTeamLogoPath string
@@ -33,6 +37,9 @@ type PlannedViewModel struct {
 
 	// GuestTeamShortName is the abbreviated name of the guest team.
 	GuestTeamShortName string
+
+	// GuestTeamHometown is the display hometown of the guest team.
+	GuestTeamHometown string
 
 	// GuestTeamLogoPath is the filesystem path to the guest team logo image.
 	// Empty string means no logo is available.
@@ -117,6 +124,9 @@ type IntermissionViewModel struct {
 	// HomeTeamShortName is the abbreviated name of the home team.
 	HomeTeamShortName string
 
+	// HomeTeamHometown is the display hometown of the home team.
+	HomeTeamHometown string
+
 	// HomeTeamLogoPath is the filesystem path to the home team logo image.
 	// Empty string means no logo is available.
 	HomeTeamLogoPath string
@@ -126,6 +136,9 @@ type IntermissionViewModel struct {
 
 	// GuestTeamShortName is the abbreviated name of the guest team.
 	GuestTeamShortName string
+
+	// GuestTeamHometown is the display hometown of the guest team.
+	GuestTeamHometown string
 
 	// GuestTeamLogoPath is the filesystem path to the guest team logo image.
 	// Empty string means no logo is available.

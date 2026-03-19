@@ -67,9 +67,11 @@ func BuildIntermissionViewModel(
 	return IntermissionViewModel{
 		HomeTeamName:       home.Name,
 		HomeTeamShortName:  home.ShortName,
+		HomeTeamHometown:   home.Hometown,
 		HomeTeamLogoPath:   home.LogoPath,
 		GuestTeamName:      guest.Name,
 		GuestTeamShortName: guest.ShortName,
+		GuestTeamHometown:  guest.Hometown,
 		GuestTeamLogoPath:  guest.LogoPath,
 		HomeSetsWon:        homeSetsWon,
 		GuestSetsWon:       guestSetsWon,

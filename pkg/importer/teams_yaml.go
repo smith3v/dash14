@@ -15,6 +15,7 @@ type TeamImportRecord struct {
 	Key       string   `yaml:"key"`
 	Name      string   `yaml:"name"`
 	ShortName string   `yaml:"short_name"`
+	Hometown  string   `yaml:"hometown"`
 	Logo      string   `yaml:"logo"`
 	Aliases   []string `yaml:"aliases"`
 }

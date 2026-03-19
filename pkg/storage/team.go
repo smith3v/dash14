@@ -10,6 +10,7 @@ type Team struct {
 	Key       string `gorm:"uniqueIndex;not null"`
 	Name      string `gorm:"not null"`
 	ShortName string `gorm:"not null"`
+	Hometown  string
 	LogoPath  string
 	Aliases   []string `gorm:"serializer:json"`
 	CreatedAt time.Time

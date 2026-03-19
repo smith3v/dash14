@@ -23,6 +23,7 @@ func TestParseTeamsYAML_Valid(t *testing.T) {
 		key       string
 		name      string
 		shortName string
+		hometown  string
 		logo      string
 		aliases   []string
 	}{
@@ -31,6 +32,7 @@ func TestParseTeamsYAML_Valid(t *testing.T) {
 			key:       "lokomotiv",
 			name:      "Lokomotiv Novosibirsk",
 			shortName: "LOK",
+			hometown:  "Novosibirsk",
 			logo:      "logos/lokomotiv.png",
 			aliases:   []string{"Loko", "Lokomotiv"},
 		},
@@ -39,6 +41,7 @@ func TestParseTeamsYAML_Valid(t *testing.T) {
 			key:       "zenit",
 			name:      "Zenit Saint Petersburg",
 			shortName: "ZEN",
+			hometown:  "Saint Petersburg",
 			logo:      "logos/zenit.png",
 			aliases:   []string{"Zenit SPb"},
 		},
@@ -55,6 +58,9 @@ func TestParseTeamsYAML_Valid(t *testing.T) {
 		}
 		if r.ShortName != tt.shortName {
 			t.Errorf("records[%d].ShortName = %q, want %q", tt.idx, r.ShortName, tt.shortName)
+		}
+		if r.Hometown != tt.hometown {
+			t.Errorf("records[%d].Hometown = %q, want %q", tt.idx, r.Hometown, tt.hometown)
 		}
 		if r.Logo != tt.logo {
 			t.Errorf("records[%d].Logo = %q, want %q", tt.idx, r.Logo, tt.logo)

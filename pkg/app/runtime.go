@@ -179,11 +179,13 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 	homeTeam := overlay.TeamIdentity{
 		Name:      home.Name,
 		ShortName: home.ShortName,
+		Hometown:  home.Hometown,
 		LogoPath:  home.LogoPath,
 	}
 	guestTeam := overlay.TeamIdentity{
 		Name:      guest.Name,
 		ShortName: guest.ShortName,
+		Hometown:  guest.Hometown,
 		LogoPath:  guest.LogoPath,
 	}
 	setScores := overlay.BuildSetScoreHistory(sets)
@@ -192,9 +194,11 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 		if err := renderer.RenderPlanned(overlay.PlannedViewModel{
 			HomeTeamName:       home.Name,
 			HomeTeamShortName:  home.ShortName,
+			HomeTeamHometown:   home.Hometown,
 			HomeTeamLogoPath:   home.LogoPath,
 			GuestTeamName:      guest.Name,
 			GuestTeamShortName: guest.ShortName,
+			GuestTeamHometown:  guest.Hometown,
 			GuestTeamLogoPath:  guest.LogoPath,
 		}); err != nil {
 			return err

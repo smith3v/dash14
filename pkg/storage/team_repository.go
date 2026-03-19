@@ -26,6 +26,7 @@ func (r *TeamRepository) UpsertTeam(team *Team) error {
 		Assign(Team{
 			Name:      team.Name,
 			ShortName: team.ShortName,
+			Hometown:  team.Hometown,
 			LogoPath:  team.LogoPath,
 			Aliases:   team.Aliases,
 		}).
