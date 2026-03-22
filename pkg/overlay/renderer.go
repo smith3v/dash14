@@ -106,18 +106,27 @@ func (r *Renderer) refreshLoop(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			templates, err := loadRendererTemplates(r.cfg)
-			if err != nil {
+			if err := r.RefreshTemplates(); err != nil {
 				if logger != nil {
 					logger.Error("overlay template refresh failed", "err", err)
 				}
 				continue
 			}
-			r.mu.Lock()
-			r.templates = templates
-			r.mu.Unlock()
 		}
 	}
+}
+
+// RefreshTemplates reloads the renderer template snapshot from disk and swaps
+// it in atomically only after all template files parse successfully.
+func (r *Renderer) RefreshTemplates() error {
+	templates, err := loadRendererTemplates(r.cfg)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.templates = templates
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *Renderer) templateSnapshot() rendererTemplates {

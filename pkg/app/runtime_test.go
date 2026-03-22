@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
+	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 	"github.com/smith3v/dash14/pkg/telegram"
 )
@@ -167,6 +170,116 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	if !sawRenderedIntermission {
 		t.Fatal("expected intermission overlay to be rendered before telegram start")
 	}
+}
+
+func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "dash14.db")
+	outputPath := filepath.Join(dir, "overlay", "current.html")
+	plannedTpl := filepath.Join(dir, "planned.tmpl")
+	liveTpl := filepath.Join(dir, "live.tmpl")
+	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
+	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write planned template: %v", err)
+	}
+	if err := os.WriteFile(liveTpl, []byte("live {{.LeftTeamName}} {{.LeftScore}}"), 0o644); err != nil {
+		t.Fatalf("write live template: %v", err)
+	}
+	if err := os.WriteFile(intermissionTpl, []byte("intermission {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write intermission template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished-v1 {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
+	}
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	teams := storage.NewTeamRepository(db)
+	games := storage.NewGameRepository(db)
+	home := &storage.Team{Key: "home", Name: "Very Long Home Team Name", ShortName: "HOME"}
+	guest := &storage.Team{Key: "guest", Name: "Guest Team", ShortName: "GUEST"}
+	if err := teams.UpsertTeam(home); err != nil {
+		t.Fatalf("upsert home: %v", err)
+	}
+	if err := teams.UpsertTeam(guest); err != nil {
+		t.Fatalf("upsert guest: %v", err)
+	}
+	current := &storage.Game{
+		HomeTeamID:       home.ID,
+		GuestTeamID:      guest.ID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusFinished,
+		Phase:            storage.GamePhaseFinished,
+		CurrentSetNumber: 4,
+		HomeSetsWon:      3,
+		GuestSetsWon:     1,
+	}
+	if err := games.CreateGame(current); err != nil {
+		t.Fatalf("create game: %v", err)
+	}
+	if err := games.SetCurrentGameID(current.ID); err != nil {
+		t.Fatalf("set current game: %v", err)
+	}
+
+	renderer := overlay.NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:      plannedTpl,
+		LiveTemplatePath:         liveTpl,
+		IntermissionTemplatePath: intermissionTpl,
+		FinishedTemplatePath:     finishedTpl,
+		OutputPath:               outputPath,
+		LogoDir:                  filepath.Join(dir, "logos"),
+	})
+
+	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
+		t.Fatalf("initial renderCurrentOverlay: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read initial output: %v", err)
+	}
+	if !strings.Contains(string(data), "finished-v1 Very Long Home Team Name") {
+		t.Fatalf("initial output = %q, want finished-v1 content", string(data))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startOverlayRefreshLoop(
+		ctx,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		20*time.Millisecond,
+		games,
+		teams,
+		renderer,
+	)
+
+	if err := os.WriteFile(finishedTpl, []byte("finished-v2 {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write updated finished template: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		data, err = os.ReadFile(outputPath)
+		if err != nil {
+			t.Fatalf("read refreshed output: %v", err)
+		}
+		if strings.Contains(string(data), "finished-v2 Very Long Home Team Name") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("refreshed output = %q, want finished-v2 content", string(data))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	time.Sleep(30 * time.Millisecond)
 }
 
 func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {

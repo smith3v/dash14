@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/importer"
@@ -128,7 +129,14 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 		return fmt.Errorf("app: validate overlay templates: %w", err)
 	}
 	renderer := deps.newRenderer(cfg.Overlay)
-	renderer.StartTemplateRefresh(ctx, logger)
+	startOverlayRefreshLoop(
+		ctx,
+		logger,
+		time.Duration(cfg.Overlay.TemplateCacheRefreshIntervalSeconds)*time.Second,
+		games,
+		teams,
+		renderer,
+	)
 	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
 		return fmt.Errorf("app: render current overlay: %w", err)
 	}
@@ -139,6 +147,41 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 	}
 	startTelegram(ctx)
 	return nil
+}
+
+func startOverlayRefreshLoop(
+	ctx context.Context,
+	logger *slog.Logger,
+	interval time.Duration,
+	games *storage.GameRepository,
+	teams *storage.TeamRepository,
+	renderer *overlay.Renderer,
+) {
+	if interval <= 0 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := renderer.RefreshTemplates(); err != nil {
+					if logger != nil {
+						logger.Error("overlay template refresh failed", "err", err)
+					}
+					continue
+				}
+				if err := renderCurrentOverlay(games, teams, renderer); err != nil && logger != nil {
+					logger.Error("overlay rerender failed after template refresh", "err", err)
+				}
+			}
+		}
+	}()
 }
 
 func validateOverlayTemplates(cfg config.OverlayConfig) error {
