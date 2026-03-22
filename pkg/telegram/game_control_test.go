@@ -341,6 +341,7 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
 
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 3)
 	msgs := fb.SentMessages()
 	foundBroadcast := false
 	for _, m := range msgs {

@@ -22,15 +22,20 @@ type OverlayRenderer interface {
 // Handler dependencies (database repositories, renderer, etc.) will be added
 // as fields here in subsequent tasks.
 type Router struct {
-	b        *bot.Bot
-	logger   *slog.Logger
-	client   BotClient
-	users    *storage.UserRepository
-	teams    *storage.TeamRepository
-	games    *storage.GameRepository
-	renderer OverlayRenderer
-	plans    sync.Map // map[int64]*planState — keyed by Telegram user ID
+	b                   *bot.Bot
+	logger              *slog.Logger
+	client              BotClient
+	users               *storage.UserRepository
+	teams               *storage.TeamRepository
+	games               *storage.GameRepository
+	renderer            OverlayRenderer
+	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
+	broadcastQueueSize  int
+	broadcastJobs       chan broadcastJob
+	broadcastWorkerOnce sync.Once
 }
+
+const defaultBroadcastQueueSize = 32
 
 // NewRouter creates a Router that registers handlers on b.
 // client is the BotClient used to send messages (typically b itself, or a
@@ -38,11 +43,12 @@ type Router struct {
 // teams is the TeamRepository used by the /plan wizard.
 func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage.UserRepository, teams *storage.TeamRepository) *Router {
 	return &Router{
-		b:      b,
-		logger: logger,
-		client: client,
-		users:  users,
-		teams:  teams,
+		b:                  b,
+		logger:             logger,
+		client:             client,
+		users:              users,
+		teams:              teams,
+		broadcastQueueSize: defaultBroadcastQueueSize,
 	}
 }
 

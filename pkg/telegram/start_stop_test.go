@@ -3,9 +3,12 @@ package telegram
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -316,6 +319,60 @@ func (e *errBot) SentCount() int {
 	return len(e.sent)
 }
 
+func (e *errBot) SentMessages() []sentMessage {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]sentMessage, len(e.sent))
+	copy(out, e.sent)
+	return out
+}
+
+type blockingBot struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	sent    []sentMessage
+}
+
+func (b *blockingBot) SendMessage(_ context.Context, params *bot.SendMessageParams) (*models.Message, error) {
+	chatID, _ := params.ChatID.(int64)
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.release
+	b.mu.Lock()
+	b.sent = append(b.sent, sentMessage{ChatID: chatID, Text: params.Text})
+	b.mu.Unlock()
+	return &models.Message{ID: 1}, nil
+}
+
+func (b *blockingBot) EditMessageText(_ context.Context, _ *bot.EditMessageTextParams) (*models.Message, error) {
+	return &models.Message{ID: 1}, nil
+}
+
+func (b *blockingBot) AnswerCallbackQuery(_ context.Context, _ *bot.AnswerCallbackQueryParams) (bool, error) {
+	return true, nil
+}
+
+func (b *blockingBot) SentCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.sent)
+}
+
+func waitForSentCount(t *testing.T, sentCount func() int, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sentCount() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for sent count %d, got %d", want, sentCount())
+}
+
 // TestBroadcastSendsToAllSubscribed verifies that Broadcast delivers the
 // message to every subscribed user.
 func TestBroadcastSendsToAllSubscribed(t *testing.T) {
@@ -333,6 +390,7 @@ func TestBroadcastSendsToAllSubscribed(t *testing.T) {
 
 	r.Broadcast(ctx, "hello everyone")
 
+	waitForSentCount(t, eb.SentCount, 3)
 	if got := eb.SentCount(); got != 3 {
 		t.Errorf("expected 3 messages sent, got %d", got)
 	}
@@ -358,6 +416,7 @@ func TestBroadcastPartialFailureContinues(t *testing.T) {
 	r.Broadcast(ctx, "partial test")
 
 	// Exactly 2 messages must have been delivered (4001 and 4003).
+	waitForSentCount(t, eb.SentCount, 2)
 	if got := eb.SentCount(); got != 2 {
 		t.Errorf("expected 2 successful sends (one failure skipped), got %d", got)
 	}
@@ -383,6 +442,7 @@ func TestBroadcastSkipsUnsubscribed(t *testing.T) {
 
 	r.Broadcast(ctx, "only one should get this")
 
+	waitForSentCount(t, eb.SentCount, 1)
 	if got := eb.SentCount(); got != 1 {
 		t.Errorf("expected 1 message sent (unsubscribed user skipped), got %d", got)
 	}
@@ -405,12 +465,46 @@ func TestBroadcastExceptSkipsExcluded(t *testing.T) {
 
 	r.BroadcastExcept(ctx, "skip one", 6002)
 
+	waitForSentCount(t, eb.SentCount, 2)
 	if got := eb.SentCount(); got != 2 {
 		t.Fatalf("expected 2 sends with one excluded user, got %d", got)
 	}
-	for _, m := range eb.sent {
+	for _, m := range eb.SentMessages() {
 		if m.ChatID == 6002 {
 			t.Fatalf("excluded user %d unexpectedly received a message", m.ChatID)
 		}
 	}
+}
+
+func TestBroadcastQueueFullDropsWithoutBlocking(t *testing.T) {
+	store := openTestStore(t)
+	bb := &blockingBot{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	b := newTestBot(t)
+	r := NewRouter(b, slog.New(slog.NewTextHandler(io.Discard, nil)), bb, store.users, nil)
+	r.broadcastQueueSize = 1
+	ctx := context.Background()
+
+	if err := store.users.UpsertTelegramUser(7001, "", "Viewer"); err != nil {
+		t.Fatalf("UpsertTelegramUser(7001): %v", err)
+	}
+
+	r.Broadcast(ctx, "first")
+	select {
+	case <-bb.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for worker to start first broadcast")
+	}
+
+	start := time.Now()
+	r.Broadcast(ctx, "second")
+	r.Broadcast(ctx, "third")
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("expected enqueue path to remain non-blocking, took %v", elapsed)
+	}
+
+	close(bb.release)
+	waitForSentCount(t, bb.SentCount, 2)
 }
