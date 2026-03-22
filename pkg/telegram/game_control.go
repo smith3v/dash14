@@ -132,10 +132,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 
 	broadcastText := ""
 	var overlayJob *overlayJob
+	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
 
 	switch data {
 	case "game:start":
-		if game.Status != storage.GameStatusPlanned {
+		if phase != storage.GamePhasePlanned {
 			return
 		}
 		gState, setState, err := game2.StartPlannedGame(toGameState(game))
@@ -159,8 +160,40 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		activeSet = newSet
 		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
 
+	case "game:set:start_next":
+		if phase != storage.GamePhaseBetweenSets {
+			return
+		}
+		gState, setState, err := game2.StartNextSet(toGameState(game))
+		if err != nil {
+			return
+		}
+		applyGameState(game, gState)
+		if err := r.games.SaveGame(game); err != nil {
+			return
+		}
+		nextSet := &storage.GameSet{
+			GameID:     game.ID,
+			SetNumber:  setState.SetNumber,
+			HomeScore:  setState.HomeScore,
+			GuestScore: setState.GuestScore,
+			IsFinished: false,
+		}
+		if err := r.games.CreateSet(nextSet); err != nil {
+			return
+		}
+		activeSet = nextSet
+		broadcastText = fmt.Sprintf(
+			"Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
+			nextSet.SetNumber,
+			home.Name,
+			guest.Name,
+			game.HomeSetsWon,
+			game.GuestSetsWon,
+		)
+
 	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
-		if game.Status != storage.GameStatusInProgress || activeSet == nil {
+		if phase != storage.GamePhaseSetInProgress || activeSet == nil {
 			return
 		}
 		score := game2.SetScore{
@@ -197,7 +230,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		broadcastText = formatBroadcastScore(game, home, guest, activeSet)
 
 	case "game:set:finish":
-		if game.Status != storage.GameStatusInProgress || activeSet == nil {
+		if phase != storage.GamePhaseSetInProgress || activeSet == nil {
 			return
 		}
 		setState := game2.SetState{
@@ -222,33 +255,12 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if err := r.games.SaveGame(game); err != nil {
 			return
 		}
-		if res.NextSet != nil {
-			next := &storage.GameSet{
-				GameID:     game.ID,
-				SetNumber:  res.NextSet.SetNumber,
-				HomeScore:  res.NextSet.HomeScore,
-				GuestScore: res.NextSet.GuestScore,
-				IsFinished: false,
-			}
-			if err := r.games.CreateSet(next); err != nil {
-				return
-			}
-			activeSet = next
-		} else {
-			activeSet = nil
-		}
-		broadcastText = fmt.Sprintf(
-			"Set %d finished\n🏠 %s <b>%d-%d</b> ✈️ %s\nGame score: %d-%d",
-			setState.SetNumber,
-			home.Name,
-			setState.HomeScore,
-			setState.GuestScore,
-			guest.Name,
-			game.HomeSetsWon,
-			game.GuestSetsWon,
-		)
+		activeSet = nil
 
-	case "game:game:finish":
+	case "game:finish":
+		if phase != storage.GamePhaseBetweenSets {
+			return
+		}
 		res, err := game2.ConfirmGameFinished(toGameState(game))
 		if err != nil {
 			return
@@ -260,7 +272,13 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if err := r.games.ClearCurrentGameID(); err != nil {
 			return
 		}
-		broadcastText = fmt.Sprintf("Game finished: %s vs %s", home.Name, guest.Name)
+		broadcastText = fmt.Sprintf(
+			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
+			home.Name,
+			game.HomeSetsWon,
+			game.GuestSetsWon,
+			guest.Name,
+		)
 
 	case "game:reverse":
 		res := game2.ReverseOverlaySides(toGameState(game))
@@ -382,7 +400,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 	if phase == storage.GamePhaseBetweenSets && game2.IsGameFinishEligible(toGameState(game)) {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Finish the game", CallbackData: "game:game:finish"},
+			{Text: "Finish the game", CallbackData: "game:finish"},
 		})
 	}
 	if phase != storage.GamePhaseFinished {
@@ -526,8 +544,9 @@ func (r *Router) renderOverlayJob(job overlayJob) error {
 		LogoPath:  job.guest.LogoPath,
 	}
 	setScores := overlay.BuildSetScoreHistory(job.sets)
+	phase := job.game.EffectivePhase(job.activeSet != nil && !job.activeSet.IsFinished)
 
-	if job.game.Status == storage.GameStatusPlanned {
+	if phase == storage.GamePhasePlanned {
 		if err := r.renderer.RenderPlanned(overlay.PlannedViewModel{
 			HomeTeamName:       job.home.Name,
 			HomeTeamShortName:  job.home.ShortName,
@@ -538,6 +557,37 @@ func (r *Router) renderOverlayJob(job overlayJob) error {
 			GuestTeamHometown:  job.guest.Hometown,
 			GuestTeamLogoPath:  job.guest.LogoPath,
 		}); err != nil {
+			return err
+		}
+		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+			homeTeam,
+			guestTeam,
+			job.game.HomeSetsWon,
+			job.game.GuestSetsWon,
+			setScores,
+		))
+	}
+	if phase == storage.GamePhaseBetweenSets {
+		vm := overlay.BuildIntermissionViewModel(
+			homeTeam,
+			guestTeam,
+			job.game.HomeSetsWon,
+			job.game.GuestSetsWon,
+			setScores,
+		)
+		if err := r.renderer.RenderIntermissionMain(vm); err != nil {
+			return err
+		}
+		return r.renderer.RenderIntermission(vm)
+	}
+	if phase == storage.GamePhaseFinished {
+		if err := r.renderer.RenderFinished(overlay.BuildFinishedViewModel(
+			homeTeam,
+			guestTeam,
+			job.game.HomeSetsWon,
+			job.game.GuestSetsWon,
+			setScores,
+		)); err != nil {
 			return err
 		}
 		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(

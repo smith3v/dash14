@@ -16,6 +16,7 @@ type OverlayRenderer interface {
 	RenderPlanned(vm overlay.PlannedViewModel) error
 	RenderLive(vm overlay.LiveViewModel) error
 	RenderIntermission(vm overlay.IntermissionViewModel) error
+	RenderIntermissionMain(vm overlay.IntermissionViewModel) error
 	RenderFinished(vm overlay.FinishedViewModel) error
 }
 

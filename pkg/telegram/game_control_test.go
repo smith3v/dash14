@@ -131,7 +131,7 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	requireHasCallback(t, callbacks, "game:start")
 	requireHasCallback(t, callbacks, "game:reverse")
 	requireNoCallback(t, callbacks, "game:set:start_next")
-	requireNoCallback(t, callbacks, "game:game:finish")
+	requireNoCallback(t, callbacks, "game:finish")
 
 	got, err := store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
 	requireHasCallback(t, callbacks, "game:reverse")
 	requireNoCallback(t, callbacks, "game:start")
 	requireNoCallback(t, callbacks, "game:set:start_next")
-	requireNoCallback(t, callbacks, "game:game:finish")
+	requireNoCallback(t, callbacks, "game:finish")
 }
 
 func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
@@ -190,7 +190,7 @@ func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
 	requireNoCallbackPrefix(t, callbacks, "game:home:")
 	requireNoCallbackPrefix(t, callbacks, "game:guest:")
 	requireNoCallback(t, callbacks, "game:start")
-	requireNoCallback(t, callbacks, "game:game:finish")
+	requireNoCallback(t, callbacks, "game:finish")
 }
 
 func TestGameControlBetweenSetsShowsFinishGameWhenEligible(t *testing.T) {
@@ -205,7 +205,7 @@ func TestGameControlBetweenSetsShowsFinishGameWhenEligible(t *testing.T) {
 	view := buildGameControlMessage(game, "Home", "Guest", nil)
 	callbacks := keyboardCallbackData(t, view.Keyboard)
 
-	requireHasCallback(t, callbacks, "game:game:finish")
+	requireHasCallback(t, callbacks, "game:finish")
 	requireHasCallback(t, callbacks, "game:reverse")
 	requireNoCallback(t, callbacks, "game:set:start_next")
 	requireNoCallbackPrefix(t, callbacks, "game:home:")
@@ -367,10 +367,6 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set finish, got err=%v", err)
 	}
-	waitForCondition(t, "live overlay render after set finish", func() bool { return renderer.liveCount() > 0 })
-	if renderer.liveCount() == 0 {
-		t.Fatal("expected live overlay rendering after set finish")
-	}
 	waitForCondition(t, "intermission overlay render after set finish", func() bool { return renderer.intermissionCount() > 0 })
 	if renderer.intermissionCount() == 0 {
 		t.Fatal("expected intermission overlay rendering after set finish")
@@ -429,6 +425,9 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if g.Status != storage.GameStatusInProgress {
 		t.Fatalf("expected game to remain in_progress, got %q", g.Status)
 	}
+	if g.Phase != storage.GamePhaseBetweenSets {
+		t.Fatalf("expected game to move to between_sets, got %q", g.Phase)
+	}
 	if g.HomeSetsWon != 4 {
 		t.Fatalf("expected home sets won to become 4, got %d", g.HomeSetsWon)
 	}
@@ -439,10 +438,7 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set 4 finish prompt, got err=%v", err)
 	}
-	waitForCondition(t, "live overlay render after set 4 finish", func() bool { return renderer.liveCount() > 0 })
-	if renderer.liveCount() == 0 {
-		t.Fatal("expected live overlay rendering after set finish")
-	}
+	waitForCondition(t, "intermission overlay render after set 4 finish", func() bool { return renderer.intermissionCount() > 0 })
 }
 
 func TestGameControlBroadcastTextGeneration(t *testing.T) {
@@ -482,6 +478,127 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 		if m.ChatID == adminID {
 			t.Fatalf("expected active admin %d to be excluded from broadcasts", adminID)
 		}
+	}
+}
+
+func TestGameControlSetFinishDoesNotBroadcast(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const adminID int64 = 7307
+	const subID int64 = 7308
+	const chatID int64 = 8307
+	store.createAdminUser(t, adminID, "owner-no-broadcast")
+	if err := store.users.UpsertTelegramUser(subID, "subscriber2", "Subscriber Two"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, adminID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
+	current, _ := store.games.GetGameByID(game.ID)
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-no-broadcast", "game:start"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+
+	g, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	g.HomeSetsWon = 2
+	g.GuestSetsWon = 0
+	g.CurrentSetNumber = 3
+	if err := store.games.SaveGame(g); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	set, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet: %v", err)
+	}
+	set.SetNumber = 3
+	set.HomeScore = 25
+	set.GuestScore = 10
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet: %v", err)
+	}
+
+	before := len(fb.SentMessages())
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish-no-broadcast", "game:set:finish"))
+	time.Sleep(100 * time.Millisecond)
+
+	if len(fb.SentMessages()) != before {
+		t.Fatalf("expected no new broadcast on set finish, got %d messages total", len(fb.SentMessages()))
+	}
+}
+
+func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const adminID int64 = 7309
+	const subID int64 = 7314
+	const chatID int64 = 8309
+	store.createAdminUser(t, adminID, "owner-next-set")
+	if err := store.users.UpsertTelegramUser(subID, "subscriber3", "Subscriber Three"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, adminID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
+	current, _ := store.games.GetGameByID(game.ID)
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next-flow", "game:start"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+
+	g, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	g.HomeSetsWon = 2
+	g.GuestSetsWon = 1
+	g.CurrentSetNumber = 3
+	g.Phase = storage.GamePhaseBetweenSets
+	if err := store.games.SaveGame(g); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	set, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet: %v", err)
+	}
+	set.IsFinished = true
+	set.SetNumber = 3
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet: %v", err)
+	}
+
+	before := len(fb.SentMessages())
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next", "game:set:start_next"))
+
+	g, err = store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after next set start: %v", err)
+	}
+	if g.Phase != storage.GamePhaseSetInProgress {
+		t.Fatalf("expected phase set_in_progress, got %q", g.Phase)
+	}
+	if g.CurrentSetNumber != 4 {
+		t.Fatalf("expected current set number 4, got %d", g.CurrentSetNumber)
+	}
+	active, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet after next set start: %v", err)
+	}
+	if active.SetNumber != 4 || active.HomeScore != 0 || active.GuestScore != 0 || active.IsFinished {
+		t.Fatalf("unexpected active set after start next set: %+v", active)
+	}
+	waitForCondition(t, "live overlay render after next set start", func() bool { return renderer.liveCount() > 0 })
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, before+1)
+
+	msgs := fb.SentMessages()
+	last := msgs[len(msgs)-1]
+	if last.ChatID != subID || !strings.Contains(last.Text, "Set 4 started") {
+		t.Fatalf("expected next-set broadcast to subscriber, got chat=%d text=%q", last.ChatID, last.Text)
 	}
 }
 
@@ -529,7 +646,7 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 		t.Fatalf("SaveSet finished: %v", err)
 	}
 
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-game-finish", "game:game:finish"))
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-game-finish", "game:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -537,6 +654,9 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	if g.Status != storage.GameStatusFinished {
 		t.Fatalf("expected finished status, got %q", g.Status)
+	}
+	if g.Phase != storage.GamePhaseFinished {
+		t.Fatalf("expected finished phase, got %q", g.Phase)
 	}
 
 	edited := fb.EditedMessages()
@@ -553,6 +673,64 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	if len(kb.InlineKeyboard) != 0 {
 		t.Fatalf("expected no controls after finish, got %d keyboard rows", len(kb.InlineKeyboard))
+	}
+}
+
+func TestGameControlGameFinishBroadcastsSummary(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const adminID int64 = 7315
+	const subID int64 = 7316
+	const chatID int64 = 8315
+	store.createAdminUser(t, adminID, "owner-finish-broadcast")
+	if err := store.users.UpsertTelegramUser(subID, "subscriber4", "Subscriber Four"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, adminID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-finish-broadcast", "game:start"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+
+	g, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after start: %v", err)
+	}
+	g.HomeSetsWon = 4
+	g.GuestSetsWon = 0
+	g.CurrentSetNumber = 4
+	g.Phase = storage.GamePhaseBetweenSets
+	if err := store.games.SaveGame(g); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	set, err := store.games.GetActiveSet(game.ID)
+	if err != nil {
+		t.Fatalf("GetActiveSet: %v", err)
+	}
+	set.IsFinished = true
+	set.SetNumber = 4
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet: %v", err)
+	}
+
+	before := len(fb.SentMessages())
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, before+1)
+
+	msgs := fb.SentMessages()
+	last := msgs[len(msgs)-1]
+	if last.ChatID != subID {
+		t.Fatalf("expected final summary broadcast to subscriber, got chat=%d", last.ChatID)
+	}
+	if !strings.Contains(last.Text, "Game finished") || !strings.Contains(last.Text, "4-0") {
+		t.Fatalf("expected final summary broadcast, got %q", last.Text)
 	}
 }
 
@@ -592,6 +770,15 @@ func (b *blockingOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
 }
 
 func (b *blockingOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewModel) error {
+	b.signalStarted()
+	<-b.release
+	b.mu.Lock()
+	b.breakCount++
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingOverlayRenderer) RenderIntermissionMain(vm overlay.IntermissionViewModel) error {
 	b.signalStarted()
 	<-b.release
 	b.mu.Lock()

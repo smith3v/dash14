@@ -51,6 +51,13 @@ func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewMode
 	return nil
 }
 
+func (f *fakeOverlayRenderer) RenderIntermissionMain(vm overlay.IntermissionViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.intermission = append(f.intermission, vm)
+	return nil
+}
+
 func (f *fakeOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -74,6 +81,12 @@ func (f *fakeOverlayRenderer) intermissionCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.intermission)
+}
+
+func (f *fakeOverlayRenderer) finishedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.finished)
 }
 
 func (f *fakeOverlayRenderer) lastIntermission() overlay.IntermissionViewModel {
