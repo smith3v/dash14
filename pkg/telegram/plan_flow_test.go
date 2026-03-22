@@ -448,6 +448,9 @@ func TestPlanCreateGameFromGuestSelection(t *testing.T) {
 	if current.Status != storage.GameStatusPlanned {
 		t.Fatalf("expected planned status, got %q", current.Status)
 	}
+	if current.Phase != storage.GamePhasePlanned {
+		t.Fatalf("expected planned phase, got %q", current.Phase)
+	}
 	if current.HomeTeamID != home.ID || current.GuestTeamID != guest.ID {
 		t.Fatalf("unexpected teams on planned game: home=%d guest=%d", current.HomeTeamID, current.GuestTeamID)
 	}
@@ -489,6 +492,7 @@ func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
 		CurrentSetNumber: 1,
 	}
 	if err := store.games.CreateGame(existing); err != nil {
