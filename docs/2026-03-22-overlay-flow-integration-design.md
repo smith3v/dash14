@@ -141,7 +141,7 @@ Recommended shape:
     next `SetState`
   - set phase to `set_in_progress`
 - `ConfirmGameFinished`:
-  - require `between_sets` or another explicitly safe non-live phase
+  - require `between_sets`
   - set phase to `finished`
 
 This avoids allowing the match to be marked finished while score entry is still

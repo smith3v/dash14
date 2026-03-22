@@ -5,13 +5,13 @@ It stores match state in SQLite, renders OBS-ready HTML overlay files, and expos
 
 ## Features
 
-- Single active match per device (`planned`, `in_progress`, `finished`)
+- Single active match per device (`planned`, `set_in_progress`, `between_sets`, `finished`)
 - Team import from YAML with logo copy into a managed local directory
-- OBS overlay rendering for planned, live, and intermission states
-- Separate intermission scoreboard page with per-set history and live in-set scores
+- OBS overlay rendering for planned, live, between-set intermission, and finished states
+- Separate intermission scoreboard page with per-set history for compatibility OBS setups
 - Telegram subscriber flow (`/start`, `/stop`)
 - Admin-only game planning and control (`/plan`, `/game`, `/takeover`)
-- Read-only broadcast updates to subscribed users
+- Read-only broadcast updates to subscribed users for game start, score changes, next-set start, and match finish
 - Persistent state in SQLite
 
 ## Requirements
@@ -188,6 +188,7 @@ What it does:
 - `+1` / `-1` home score
 - `+1` / `-1` guest score
 - confirm set finish when finishable
+- start next set after intermission
 - confirm game finish when eligible
 - reverse overlay sides
 
@@ -206,10 +207,11 @@ WHERE telegram_user_id = 123456789;
 ## OBS Setup
 
 1. Start `dash14` runtime.
-2. In OBS, add a **Browser Source** for the normal planned/live overlay.
+2. In OBS, add a **Browser Source** for the main overlay.
 3. Point it to `runtime/out/overlay.html`.
 4. Add a second **Browser Source** for the break screen and point it to `runtime/out/intermission.html`.
-5. Re-rendering happens after state changes, including updates to the current unfinished set.
+5. The main overlay file will switch between planned, live, between-set intermission, and finished presentations as match phase changes.
+6. Re-rendering happens after state changes, including score updates and explicit next-set starts.
 
 ## Development
 
