@@ -193,14 +193,16 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 	setScores := overlay.BuildSetScoreHistory(sets)
 
 	set, err := games.GetActiveSet(current.ID)
+	hasActiveSet := true
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		hasActiveSet = false
 		set = &storage.GameSet{SetNumber: current.CurrentSetNumber}
 	}
 
-	phase := current.EffectivePhase(set != nil && !set.IsFinished)
+	phase := current.EffectivePhase(hasActiveSet)
 	switch phase {
 	case storage.GamePhasePlanned:
 		if err := renderer.RenderPlanned(overlay.PlannedViewModel{
