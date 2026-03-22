@@ -34,6 +34,11 @@ overlay:
   # The importer copies logos here and the overlay references them by path.
   logo_dir: "runtime/data/logos"
 
+  # template_cache_refresh_interval_seconds controls how often parsed overlay
+  # templates are reloaded from disk.
+  # 0 means load templates once at startup and keep them in memory indefinitely.
+  template_cache_refresh_interval_seconds: 0
+
 logging:
   # level sets the minimum log level. Accepted values: debug, info, warn, error.
   # Defaults to "info" when omitted.

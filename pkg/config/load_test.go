@@ -38,6 +38,7 @@ overlay:
   intermission_template_path: "templates/intermission.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
+  template_cache_refresh_interval_seconds: 60
 logging:
   level: "info"
   file_path: "var/dash14.log"
@@ -78,6 +79,9 @@ func TestLoad_ValidYAML(t *testing.T) {
 	}
 	if cfg.Overlay.LogoDir != "var/logos" {
 		t.Errorf("Overlay.LogoDir = %q, want %q", cfg.Overlay.LogoDir, "var/logos")
+	}
+	if cfg.Overlay.TemplateCacheRefreshIntervalSeconds != 60 {
+		t.Errorf("Overlay.TemplateCacheRefreshIntervalSeconds = %d, want %d", cfg.Overlay.TemplateCacheRefreshIntervalSeconds, 60)
 	}
 	if cfg.Logging.Level != "info" {
 		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, "info")
@@ -172,6 +176,35 @@ logging:
 	}
 }
 
+func TestLoad_TemplateCacheRefreshInterval_DefaultsToZeroWhenOmitted(t *testing.T) {
+	t.Parallel()
+
+	content := `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+logging:
+  level: "info"
+`
+
+	path := writeTemp(t, content)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	if cfg.Overlay.TemplateCacheRefreshIntervalSeconds != 0 {
+		t.Fatalf("Overlay.TemplateCacheRefreshIntervalSeconds = %d, want 0", cfg.Overlay.TemplateCacheRefreshIntervalSeconds)
+	}
+}
+
 func TestValidateRuntime(t *testing.T) {
 	t.Parallel()
 
@@ -184,6 +217,39 @@ func TestValidateRuntime(t *testing.T) {
 		{
 			name:    "valid: all required fields present",
 			content: validYAML,
+			wantErr: false,
+		},
+		{
+			name: "valid: omitted template refresh interval defaults to zero",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+`,
+			wantErr: false,
+		},
+		{
+			name: "valid: positive template refresh interval",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+  template_cache_refresh_interval_seconds: 30
+`,
 			wantErr: false,
 		},
 		{
@@ -209,6 +275,24 @@ telegram:
 			content:     `{}`,
 			wantErr:     true,
 			wantErrSubs: []string{"telegram.token", "sqlite.path"},
+		},
+		{
+			name: "negative template refresh interval",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+  template_cache_refresh_interval_seconds: -1
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.template_cache_refresh_interval_seconds"},
 		},
 	}
 
@@ -254,6 +338,16 @@ func TestValidateImport(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid: positive template refresh interval",
+			content: `
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  template_cache_refresh_interval_seconds: 15
+`,
+			wantErr: false,
+		},
+		{
 			name:    "valid: full config also passes import validation",
 			content: validYAML,
 			wantErr: false,
@@ -272,6 +366,17 @@ telegram:
 			content:     `{}`,
 			wantErr:     true,
 			wantErrSubs: []string{"sqlite.path"},
+		},
+		{
+			name: "negative template refresh interval",
+			content: `
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  template_cache_refresh_interval_seconds: -5
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.template_cache_refresh_interval_seconds"},
 		},
 	}
 
