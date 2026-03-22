@@ -114,7 +114,6 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 	teams := storage.NewTeamRepository(db)
 	users := storage.NewUserRepository(db)
 	games := storage.NewGameRepository(db)
-	renderer := deps.newRenderer(cfg.Overlay)
 
 	if opts.ImportMode() {
 		imp := deps.newImporter(teams, deps.newLogoStore(cfg.Overlay.LogoDir))
@@ -128,6 +127,7 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 	if err := deps.validateTempl(cfg.Overlay); err != nil {
 		return fmt.Errorf("app: validate overlay templates: %w", err)
 	}
+	renderer := deps.newRenderer(cfg.Overlay)
 	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
 		return fmt.Errorf("app: render current overlay: %w", err)
 	}
@@ -147,10 +147,8 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.LiveTemplatePath); err != nil {
 		return err
 	}
-	if cfg.IntermissionTemplatePath != "" {
-		if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
-			return err
-		}
+	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
+		return err
 	}
 	return nil
 }

@@ -271,10 +271,64 @@ telegram:
 			wantErrSubs: []string{"sqlite.path"},
 		},
 		{
+			name: "missing intermission template path",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.intermission_template_path"},
+		},
+		{
+			name: "missing planned template path",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.planned_template_path"},
+		},
+		{
+			name: "missing live template path",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.live_template_path"},
+		},
+		{
 			name:        "missing both telegram token and sqlite path",
 			content:     `{}`,
 			wantErr:     true,
-			wantErrSubs: []string{"telegram.token", "sqlite.path"},
+			wantErrSubs: []string{
+				"telegram.token",
+				"sqlite.path",
+				"overlay.planned_template_path",
+				"overlay.live_template_path",
+				"overlay.intermission_template_path",
+			},
 		},
 		{
 			name: "negative template refresh interval",

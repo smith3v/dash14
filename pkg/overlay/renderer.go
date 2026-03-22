@@ -44,11 +44,9 @@ func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
 	}
 
 	templates := rendererTemplates{
-		planned: load(cfg.PlannedTemplatePath, "planned"),
-		live:    load(cfg.LiveTemplatePath, "live"),
-	}
-	if cfg.IntermissionTemplatePath != "" {
-		templates.intermission = load(cfg.IntermissionTemplatePath, "intermission")
+		planned:      load(cfg.PlannedTemplatePath, "planned"),
+		live:         load(cfg.LiveTemplatePath, "live"),
+		intermission: load(cfg.IntermissionTemplatePath, "intermission"),
 	}
 	return templates
 }
@@ -73,9 +71,6 @@ func (r *Renderer) RenderLive(vm LiveViewModel) error {
 // RenderIntermission renders the cached intermission template to the derived
 // intermission output path.
 func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
-	if r.templates.intermission == nil {
-		return nil
-	}
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
