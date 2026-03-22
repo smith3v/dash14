@@ -309,7 +309,9 @@ type controlView struct {
 }
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
-	if game.Status == storage.GameStatusFinished {
+	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
+
+	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
 			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
 			game.HomeSetsWon,
@@ -338,8 +340,8 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nStatus: %s\nSet %d | Score %d-%d\nSets %d-%d\nHome: %s\nGuest: %s",
-		game.Status,
+		"Game controls\nPhase: %s\nSet %d | Score %d-%d\nSets %d-%d\nHome: %s\nGuest: %s",
+		phase,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
@@ -350,7 +352,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
-	canAdjustScore := game.Status == storage.GameStatusInProgress && activeSet != nil
+	canAdjustScore := phase == storage.GamePhaseSetInProgress && activeSet != nil
 	if canAdjustScore {
 		rows = append(rows,
 			[]models.InlineKeyboardButton{
@@ -363,24 +365,31 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 			},
 		)
 	}
-	if game.Status == storage.GameStatusPlanned {
+	if phase == storage.GamePhasePlanned {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Start the game", CallbackData: "game:start"},
 		})
 	}
-	if finishable {
+	if phase == storage.GamePhaseSetInProgress && finishable {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Finish the set", CallbackData: "game:set:finish"},
 		})
 	}
-	if game2.IsGameFinishEligible(toGameState(game)) {
+	if phase == storage.GamePhaseBetweenSets && !game2.IsGameFinishEligible(toGameState(game)) {
+		rows = append(rows, []models.InlineKeyboardButton{
+			{Text: "Start next set", CallbackData: "game:set:start_next"},
+		})
+	}
+	if phase == storage.GamePhaseBetweenSets && game2.IsGameFinishEligible(toGameState(game)) {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Finish the game", CallbackData: "game:game:finish"},
 		})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{
-		{Text: "Reverse overlay sides", CallbackData: "game:reverse"},
-	})
+	if phase != storage.GamePhaseFinished {
+		rows = append(rows, []models.InlineKeyboardButton{
+			{Text: "Reverse overlay sides", CallbackData: "game:reverse"},
+		})
+	}
 
 	return controlView{
 		Text:     text,
@@ -427,6 +436,7 @@ func toGameState(g *storage.Game) game2.GameState {
 		GuestSetsWon:       g.GuestSetsWon,
 		CurrentSetNumber:   g.CurrentSetNumber,
 		Status:             string(g.Status),
+		Phase:              string(g.Phase),
 		SideSwitchedInSet5: g.SideSwitchedInSet5,
 	}
 }
@@ -438,15 +448,16 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.GuestSetsWon = src.GuestSetsWon
 	dst.CurrentSetNumber = src.CurrentSetNumber
 	dst.Status = storage.GameStatus(src.Status)
+	dst.Phase = storage.GamePhase(src.Phase)
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
 type overlayJob struct {
-	game         storage.Game
-	home         storage.Team
-	guest        storage.Team
-	activeSet    *storage.GameSet
-	sets         []storage.GameSet
+	game      storage.Game
+	home      storage.Team
+	guest     storage.Team
+	activeSet *storage.GameSet
+	sets      []storage.GameSet
 }
 
 func (r *Router) buildOverlayJob(game *storage.Game, home, guest *storage.Team, activeSet *storage.GameSet) (*overlayJob, error) {

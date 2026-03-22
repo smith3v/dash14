@@ -46,6 +46,7 @@ func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64)
 		HomeTeamSide:       "left",
 		GuestTeamSide:      "right",
 		Status:             storage.GameStatusPlanned,
+		Phase:              storage.GamePhasePlanned,
 		CurrentSetNumber:   1,
 		CurrentAdminUserID: adminID,
 	}
@@ -56,6 +57,49 @@ func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64)
 		t.Fatalf("SetCurrentGameID: %v", err)
 	}
 	return game
+}
+
+func keyboardCallbackData(t *testing.T, markup any) []string {
+	t.Helper()
+	kb, ok := markup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("expected inline keyboard markup, got %T", markup)
+	}
+	var data []string
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			data = append(data, btn.CallbackData)
+		}
+	}
+	return data
+}
+
+func requireHasCallback(t *testing.T, callbacks []string, want string) {
+	t.Helper()
+	for _, cb := range callbacks {
+		if cb == want {
+			return
+		}
+	}
+	t.Fatalf("expected callback %q in %v", want, callbacks)
+}
+
+func requireNoCallbackPrefix(t *testing.T, callbacks []string, prefix string) {
+	t.Helper()
+	for _, cb := range callbacks {
+		if strings.HasPrefix(cb, prefix) {
+			t.Fatalf("unexpected callback with prefix %q in %v", prefix, callbacks)
+		}
+	}
+}
+
+func requireNoCallback(t *testing.T, callbacks []string, want string) {
+	t.Helper()
+	for _, cb := range callbacks {
+		if cb == want {
+			t.Fatalf("unexpected callback %q in %v", want, callbacks)
+		}
+	}
 }
 
 func TestGameControlCurrentAdminAccess(t *testing.T) {
@@ -81,28 +125,13 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	if last.ReplyMarkup == nil {
 		t.Fatal("expected inline keyboard on control message")
 	}
-	kb, ok := last.ReplyMarkup.(*models.InlineKeyboardMarkup)
-	if !ok {
-		t.Fatalf("expected inline keyboard markup, got %T", last.ReplyMarkup)
-	}
-	for _, row := range kb.InlineKeyboard {
-		for _, btn := range row {
-			if strings.Contains(btn.CallbackData, "game:home:") || strings.Contains(btn.CallbackData, "game:guest:") {
-				t.Fatalf("planned game control unexpectedly exposed score button %q", btn.CallbackData)
-			}
-		}
-	}
-	foundStart := false
-	for _, row := range kb.InlineKeyboard {
-		for _, btn := range row {
-			if btn.CallbackData == "game:start" {
-				foundStart = true
-			}
-		}
-	}
-	if !foundStart {
-		t.Fatal("expected planned game control to include start button")
-	}
+	callbacks := keyboardCallbackData(t, last.ReplyMarkup)
+	requireNoCallbackPrefix(t, callbacks, "game:home:")
+	requireNoCallbackPrefix(t, callbacks, "game:guest:")
+	requireHasCallback(t, callbacks, "game:start")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallback(t, callbacks, "game:set:start_next")
+	requireNoCallback(t, callbacks, "game:game:finish")
 
 	got, err := store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -114,6 +143,73 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	if got.CurrentAdminUserID != userID {
 		t.Fatalf("expected current admin %d, got %d", userID, got.CurrentAdminUserID)
 	}
+}
+
+func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
+	game := &storage.Game{
+		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseSetInProgress,
+		CurrentSetNumber: 2,
+		HomeSetsWon:      1,
+		GuestSetsWon:     0,
+	}
+	activeSet := &storage.GameSet{
+		SetNumber:  2,
+		HomeScore:  20,
+		GuestScore: 18,
+		IsFinished: false,
+	}
+
+	view := buildGameControlMessage(game, "Home", "Guest", activeSet)
+	callbacks := keyboardCallbackData(t, view.Keyboard)
+
+	requireHasCallback(t, callbacks, "game:home:-1")
+	requireHasCallback(t, callbacks, "game:home:+1")
+	requireHasCallback(t, callbacks, "game:guest:-1")
+	requireHasCallback(t, callbacks, "game:guest:+1")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallback(t, callbacks, "game:start")
+	requireNoCallback(t, callbacks, "game:set:start_next")
+	requireNoCallback(t, callbacks, "game:game:finish")
+}
+
+func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
+	game := &storage.Game{
+		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseBetweenSets,
+		CurrentSetNumber: 2,
+		HomeSetsWon:      1,
+		GuestSetsWon:     0,
+	}
+
+	view := buildGameControlMessage(game, "Home", "Guest", nil)
+	callbacks := keyboardCallbackData(t, view.Keyboard)
+
+	requireHasCallback(t, callbacks, "game:set:start_next")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallbackPrefix(t, callbacks, "game:home:")
+	requireNoCallbackPrefix(t, callbacks, "game:guest:")
+	requireNoCallback(t, callbacks, "game:start")
+	requireNoCallback(t, callbacks, "game:game:finish")
+}
+
+func TestGameControlBetweenSetsShowsFinishGameWhenEligible(t *testing.T) {
+	game := &storage.Game{
+		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseBetweenSets,
+		CurrentSetNumber: 4,
+		HomeSetsWon:      3,
+		GuestSetsWon:     1,
+	}
+
+	view := buildGameControlMessage(game, "Home", "Guest", nil)
+	callbacks := keyboardCallbackData(t, view.Keyboard)
+
+	requireHasCallback(t, callbacks, "game:game:finish")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallback(t, callbacks, "game:set:start_next")
+	requireNoCallbackPrefix(t, callbacks, "game:home:")
+	requireNoCallbackPrefix(t, callbacks, "game:guest:")
 }
 
 func TestGameControlReplacesOldControlThread(t *testing.T) {
@@ -213,7 +309,7 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 }
 
-func TestGameControlSet3FinishCreatesSet4(t *testing.T) {
+func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, _, renderer := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -258,18 +354,18 @@ func TestGameControlSet3FinishCreatesSet4(t *testing.T) {
 	if g.Status != storage.GameStatusInProgress {
 		t.Fatalf("expected game to remain in_progress, got %q", g.Status)
 	}
+	if g.Phase != storage.GamePhaseBetweenSets {
+		t.Fatalf("expected game to move to between_sets, got %q", g.Phase)
+	}
 	if g.HomeSetsWon != 3 {
 		t.Fatalf("expected home sets won to become 3, got %d", g.HomeSetsWon)
 	}
-	if g.CurrentSetNumber != 4 {
-		t.Fatalf("expected game to continue to set 4, got set %d", g.CurrentSetNumber)
+	if g.CurrentSetNumber != 3 {
+		t.Fatalf("expected current set number to remain 3 until next set starts, got %d", g.CurrentSetNumber)
 	}
-	nextSet, err := store.games.GetActiveSet(game.ID)
-	if err != nil {
-		t.Fatalf("GetActiveSet after set finish: %v", err)
-	}
-	if nextSet.SetNumber != 4 {
-		t.Fatalf("expected next active set number 4, got %d", nextSet.SetNumber)
+	_, err = store.games.GetActiveSet(game.ID)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected no active set after set finish, got err=%v", err)
 	}
 	waitForCondition(t, "live overlay render after set finish", func() bool { return renderer.liveCount() > 0 })
 	if renderer.liveCount() == 0 {
@@ -413,6 +509,7 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	g.HomeSetsWon = 4
 	g.GuestSetsWon = 0
+	g.Phase = storage.GamePhaseBetweenSets
 	g.CurrentSetNumber = 4
 	if err := store.games.SaveGame(g); err != nil {
 		t.Fatalf("SaveGame: %v", err)
@@ -426,6 +523,10 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	set.SetNumber = 4
 	if err := store.games.SaveSet(set); err != nil {
 		t.Fatalf("SaveSet: %v", err)
+	}
+	set.IsFinished = true
+	if err := store.games.SaveSet(set); err != nil {
+		t.Fatalf("SaveSet finished: %v", err)
 	}
 
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-game-finish", "game:game:finish"))
