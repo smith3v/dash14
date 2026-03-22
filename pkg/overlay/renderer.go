@@ -152,6 +152,16 @@ func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
 	return r.renderToPath(r.templateSnapshot().intermission, vm, r.intermissionOutputPath())
 }
 
+// RenderIntermissionMain renders the cached intermission template to the main
+// overlay output path. This is used when the between-set screen should replace
+// the normal live overlay without changing OBS scenes.
+func (r *Renderer) RenderIntermissionMain(vm IntermissionViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+	return r.renderToPath(r.templateSnapshot().intermission, vm, r.cfg.OutputPath)
+}
+
 // RenderFinished renders the cached finished template to the configured main
 // overlay output path.
 func (r *Renderer) RenderFinished(vm FinishedViewModel) error {

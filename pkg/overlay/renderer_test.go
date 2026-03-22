@@ -268,6 +268,59 @@ func TestRenderIntermission(t *testing.T) {
 	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-break")
 }
 
+func TestRenderIntermissionMain(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
+	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-break-main")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-break-main")
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
+	}
+
+	r := NewRenderer(cfg)
+
+	vm := IntermissionViewModel{
+		HomeTeamName:       "Kroefi HS 1",
+		HomeTeamShortName:  "DYN",
+		HomeTeamHometown:   "Assendelft",
+		HomeTeamLogoPath:   "home.png",
+		GuestTeamName:      "Spaarnestad HS 14",
+		GuestTeamShortName: "AUR",
+		GuestTeamHometown:  "Haarlem",
+		GuestTeamLogoPath:  "guest.png",
+		HomeSetsWon:        2,
+		GuestSetsWon:       1,
+		SetScores: []SetScoreViewModel{
+			{SetNumber: 1, HomeScore: 25, GuestScore: 19},
+		},
+	}
+
+	if err := r.RenderIntermissionMain(vm); err != nil {
+		t.Fatalf("RenderIntermissionMain returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("main intermission output file not readable: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{"Game Score", "Set 1", "25", "19"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("main intermission output does not contain %q", want)
+		}
+	}
+}
+
 func TestRenderFinished(t *testing.T) {
 	tmpDir := t.TempDir()
 	outDir := filepath.Join(tmpDir, "out")

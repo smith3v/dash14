@@ -359,3 +359,213 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 		t.Fatalf("expected placeholder next set to be omitted, got %q", got)
 	}
 }
+
+func TestRunWithDepsRuntimeRendersBetweenSetsOnMainOverlay(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "dash14.db")
+	outputPath := filepath.Join(dir, "overlay", "current.html")
+	plannedTpl := filepath.Join(dir, "planned.tmpl")
+	liveTpl := filepath.Join(dir, "live.tmpl")
+	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
+	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write planned template: %v", err)
+	}
+	if err := os.WriteFile(liveTpl, []byte("live {{.LeftTeamName}} {{.LeftScore}}"), 0o644); err != nil {
+		t.Fatalf("write live template: %v", err)
+	}
+	if err := os.WriteFile(intermissionTpl, []byte("intermission-main {{.HomeSetsWon}}-{{.GuestSetsWon}} {{range .SetScores}}set{{.SetNumber}} {{.HomeScore}}-{{.GuestScore}} {{end}}"), 0o644); err != nil {
+		t.Fatalf("write intermission template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished-main {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
+	}
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	teams := storage.NewTeamRepository(db)
+	games := storage.NewGameRepository(db)
+	home := &storage.Team{Key: "home", Name: "Home Team", ShortName: "HOME"}
+	guest := &storage.Team{Key: "guest", Name: "Guest Team", ShortName: "GUEST"}
+	if err := teams.UpsertTeam(home); err != nil {
+		t.Fatalf("upsert home: %v", err)
+	}
+	if err := teams.UpsertTeam(guest); err != nil {
+		t.Fatalf("upsert guest: %v", err)
+	}
+	current := &storage.Game{
+		HomeTeamID:       home.ID,
+		GuestTeamID:      guest.ID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseBetweenSets,
+		CurrentSetNumber: 2,
+		HomeSetsWon:      1,
+	}
+	if err := games.CreateGame(current); err != nil {
+		t.Fatalf("create game: %v", err)
+	}
+	if err := games.SetCurrentGameID(current.ID); err != nil {
+		t.Fatalf("set current game: %v", err)
+	}
+	if err := games.CreateSet(&storage.GameSet{
+		GameID:     current.ID,
+		SetNumber:  1,
+		HomeScore:  25,
+		GuestScore: 19,
+		IsFinished: true,
+	}); err != nil {
+		t.Fatalf("create finished set: %v", err)
+	}
+
+	cfg := config.Config{
+		Telegram: config.TelegramConfig{Token: "token"},
+		SQLite:   config.SQLiteConfig{Path: dbPath},
+		Overlay: config.OverlayConfig{
+			PlannedTemplatePath:      plannedTpl,
+			LiveTemplatePath:         liveTpl,
+			IntermissionTemplatePath: intermissionTpl,
+			FinishedTemplatePath:     finishedTpl,
+			OutputPath:               outputPath,
+			LogoDir:                  filepath.Join(dir, "logos"),
+		},
+	}
+
+	deps := defaultRuntimeDeps()
+	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+		return func(context.Context) {}, nil
+	}
+
+	if err := runWithDeps(context.Background(), Options{ConfigPath: "unused.yaml"}, deps); err != nil {
+		t.Fatalf("runWithDeps runtime mode: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read main overlay output: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "intermission-main 1-0") {
+		t.Fatalf("expected intermission main overlay, got %q", got)
+	}
+	if strings.Contains(got, "finished-main") || strings.Contains(got, "live ") || strings.Contains(got, "planned ") {
+		t.Fatalf("expected only between-sets main overlay content, got %q", got)
+	}
+}
+
+func TestRunWithDepsRuntimeRendersFinishedOnMainOverlay(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "dash14.db")
+	outputPath := filepath.Join(dir, "overlay", "current.html")
+	plannedTpl := filepath.Join(dir, "planned.tmpl")
+	liveTpl := filepath.Join(dir, "live.tmpl")
+	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
+	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write planned template: %v", err)
+	}
+	if err := os.WriteFile(liveTpl, []byte("live {{.LeftTeamName}} {{.LeftScore}}"), 0o644); err != nil {
+		t.Fatalf("write live template: %v", err)
+	}
+	if err := os.WriteFile(intermissionTpl, []byte("intermission-side {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write intermission template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished-main {{.HomeSetsWon}}-{{.GuestSetsWon}} {{range .SetScores}}set{{.SetNumber}} {{.HomeScore}}-{{.GuestScore}} {{end}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
+	}
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	teams := storage.NewTeamRepository(db)
+	games := storage.NewGameRepository(db)
+	home := &storage.Team{Key: "home", Name: "Home Team", ShortName: "HOME"}
+	guest := &storage.Team{Key: "guest", Name: "Guest Team", ShortName: "GUEST"}
+	if err := teams.UpsertTeam(home); err != nil {
+		t.Fatalf("upsert home: %v", err)
+	}
+	if err := teams.UpsertTeam(guest); err != nil {
+		t.Fatalf("upsert guest: %v", err)
+	}
+	current := &storage.Game{
+		HomeTeamID:       home.ID,
+		GuestTeamID:      guest.ID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusFinished,
+		Phase:            storage.GamePhaseFinished,
+		CurrentSetNumber: 4,
+		HomeSetsWon:      3,
+		GuestSetsWon:     1,
+	}
+	if err := games.CreateGame(current); err != nil {
+		t.Fatalf("create game: %v", err)
+	}
+	if err := games.SetCurrentGameID(current.ID); err != nil {
+		t.Fatalf("set current game: %v", err)
+	}
+	if err := games.CreateSet(&storage.GameSet{
+		GameID:     current.ID,
+		SetNumber:  1,
+		HomeScore:  25,
+		GuestScore: 19,
+		IsFinished: true,
+	}); err != nil {
+		t.Fatalf("create finished set 1: %v", err)
+	}
+	if err := games.CreateSet(&storage.GameSet{
+		GameID:     current.ID,
+		SetNumber:  2,
+		HomeScore:  17,
+		GuestScore: 25,
+		IsFinished: true,
+	}); err != nil {
+		t.Fatalf("create finished set 2: %v", err)
+	}
+
+	cfg := config.Config{
+		Telegram: config.TelegramConfig{Token: "token"},
+		SQLite:   config.SQLiteConfig{Path: dbPath},
+		Overlay: config.OverlayConfig{
+			PlannedTemplatePath:      plannedTpl,
+			LiveTemplatePath:         liveTpl,
+			IntermissionTemplatePath: intermissionTpl,
+			FinishedTemplatePath:     finishedTpl,
+			OutputPath:               outputPath,
+			LogoDir:                  filepath.Join(dir, "logos"),
+		},
+	}
+
+	deps := defaultRuntimeDeps()
+	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+		return func(context.Context) {}, nil
+	}
+
+	if err := runWithDeps(context.Background(), Options{ConfigPath: "unused.yaml"}, deps); err != nil {
+		t.Fatalf("runWithDeps runtime mode: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read main overlay output: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "finished-main 3-1 set1 25-19 set2 17-25") {
+		t.Fatalf("expected finished main overlay, got %q", got)
+	}
+	if strings.Contains(got, "intermission-side") || strings.Contains(got, "live ") || strings.Contains(got, "planned ") {
+		t.Fatalf("expected only finished main overlay content, got %q", got)
+	}
+}
