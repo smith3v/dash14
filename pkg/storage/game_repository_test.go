@@ -39,6 +39,7 @@ func TestGameCreateAndGetByID(t *testing.T) {
 		HomeTeamSide:       "left",
 		GuestTeamSide:      "right",
 		Status:             storage.GameStatusPlanned,
+		Phase:              storage.GamePhasePlanned,
 		CurrentSetNumber:   1,
 		CurrentAdminUserID: 42,
 	}
@@ -63,6 +64,9 @@ func TestGameCreateAndGetByID(t *testing.T) {
 	}
 	if got.Status != storage.GameStatusPlanned {
 		t.Errorf("Status: got %q, want %q", got.Status, storage.GameStatusPlanned)
+	}
+	if got.Phase != storage.GamePhasePlanned {
+		t.Errorf("Phase: got %q, want %q", got.Phase, storage.GamePhasePlanned)
 	}
 	if got.CurrentSetNumber != 1 {
 		t.Errorf("CurrentSetNumber: got %d, want 1", got.CurrentSetNumber)
@@ -106,6 +110,7 @@ func TestGameSaveUpdatesFields(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
 		CurrentSetNumber: 1,
 	}
 	if err := repo.CreateGame(game); err != nil {
@@ -114,6 +119,7 @@ func TestGameSaveUpdatesFields(t *testing.T) {
 
 	// Transition to in_progress and update set number.
 	game.Status = storage.GameStatusInProgress
+	game.Phase = storage.GamePhaseSetInProgress
 	game.CurrentSetNumber = 2
 	game.HomeSetsWon = 1
 	if err := repo.SaveGame(game); err != nil {
@@ -126,6 +132,9 @@ func TestGameSaveUpdatesFields(t *testing.T) {
 	}
 	if got.Status != storage.GameStatusInProgress {
 		t.Errorf("Status: got %q, want %q", got.Status, storage.GameStatusInProgress)
+	}
+	if got.Phase != storage.GamePhaseSetInProgress {
+		t.Errorf("Phase: got %q, want %q", got.Phase, storage.GamePhaseSetInProgress)
 	}
 	if got.CurrentSetNumber != 2 {
 		t.Errorf("CurrentSetNumber: got %d, want 2", got.CurrentSetNumber)
@@ -149,6 +158,7 @@ func TestGetActiveSet(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseSetInProgress,
 		CurrentSetNumber: 1,
 	}
 	if err := repo.CreateGame(game); err != nil {
@@ -234,6 +244,7 @@ func TestAppStateSingleton(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
 		CurrentSetNumber: 1,
 	}
 	if err := repo.CreateGame(game); err != nil {
@@ -330,6 +341,7 @@ func TestGetNonFinishedGame(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusFinished,
+		Phase:            storage.GamePhaseFinished,
 		CurrentSetNumber: 3,
 	}
 	if err := repo.CreateGame(finished); err != nil {
@@ -352,6 +364,7 @@ func TestGetNonFinishedGame(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
 		CurrentSetNumber: 1,
 	}
 	if err := repo.CreateGame(planned); err != nil {
@@ -370,4 +383,189 @@ func TestGetNonFinishedGame(t *testing.T) {
 			t.Fatalf("expected planned game id=%d, got %d", planned.ID, got.ID)
 		}
 	})
+}
+
+func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	repo := storage.NewGameRepository(db)
+
+	t.Run("planned_status_defaults_to_planned_phase", func(t *testing.T) {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			CurrentSetNumber: 1,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
+		}
+		if game.Phase != storage.GamePhasePlanned {
+			t.Fatalf("CreateGame inferred phase = %q, want %q", game.Phase, storage.GamePhasePlanned)
+		}
+	})
+
+	t.Run("in_progress_with_active_set_defaults_to_set_in_progress", func(t *testing.T) {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			Phase:            storage.GamePhasePlanned,
+			CurrentSetNumber: 1,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
+		}
+		if err := repo.CreateSet(&storage.GameSet{
+			GameID:     game.ID,
+			SetNumber:  1,
+			HomeScore:  4,
+			GuestScore: 3,
+			IsFinished: false,
+		}); err != nil {
+			t.Fatalf("CreateSet: %v", err)
+		}
+
+		game.Status = storage.GameStatusInProgress
+		game.Phase = ""
+		if err := repo.SaveGame(game); err != nil {
+			t.Fatalf("SaveGame: %v", err)
+		}
+
+		got, err := repo.GetGameByID(game.ID)
+		if err != nil {
+			t.Fatalf("GetGameByID: %v", err)
+		}
+		if got.Phase != storage.GamePhaseSetInProgress {
+			t.Fatalf("Phase: got %q, want %q", got.Phase, storage.GamePhaseSetInProgress)
+		}
+	})
+
+	t.Run("in_progress_without_active_set_defaults_to_between_sets", func(t *testing.T) {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			Phase:            storage.GamePhasePlanned,
+			CurrentSetNumber: 2,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
+		}
+		if err := repo.CreateSet(&storage.GameSet{
+			GameID:     game.ID,
+			SetNumber:  1,
+			HomeScore:  25,
+			GuestScore: 19,
+			IsFinished: true,
+		}); err != nil {
+			t.Fatalf("CreateSet: %v", err)
+		}
+
+		game.Status = storage.GameStatusInProgress
+		game.Phase = ""
+		if err := repo.SaveGame(game); err != nil {
+			t.Fatalf("SaveGame: %v", err)
+		}
+
+		got, err := repo.GetGameByID(game.ID)
+		if err != nil {
+			t.Fatalf("GetGameByID: %v", err)
+		}
+		if got.Phase != storage.GamePhaseBetweenSets {
+			t.Fatalf("Phase: got %q, want %q", got.Phase, storage.GamePhaseBetweenSets)
+		}
+	})
+
+	t.Run("finished_status_defaults_to_finished_phase", func(t *testing.T) {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			Phase:            storage.GamePhasePlanned,
+			CurrentSetNumber: 4,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
+		}
+
+		game.Status = storage.GameStatusFinished
+		game.Phase = ""
+		if err := repo.SaveGame(game); err != nil {
+			t.Fatalf("SaveGame: %v", err)
+		}
+
+		got, err := repo.GetGameByID(game.ID)
+		if err != nil {
+			t.Fatalf("GetGameByID: %v", err)
+		}
+		if got.Phase != storage.GamePhaseFinished {
+			t.Fatalf("Phase: got %q, want %q", got.Phase, storage.GamePhaseFinished)
+		}
+	})
+}
+
+func TestGameEffectivePhaseFallsBackFromLegacyBlankPhase(t *testing.T) {
+	tests := []struct {
+		name         string
+		game         storage.Game
+		hasActiveSet bool
+		want         storage.GamePhase
+	}{
+		{
+			name: "stored phase wins",
+			game: storage.Game{
+				Status: storage.GameStatusInProgress,
+				Phase:  storage.GamePhaseBetweenSets,
+			},
+			hasActiveSet: true,
+			want:         storage.GamePhaseBetweenSets,
+		},
+		{
+			name: "planned falls back to planned",
+			game: storage.Game{
+				Status: storage.GameStatusPlanned,
+			},
+			want: storage.GamePhasePlanned,
+		},
+		{
+			name: "in progress with active set falls back to set in progress",
+			game: storage.Game{
+				Status: storage.GameStatusInProgress,
+			},
+			hasActiveSet: true,
+			want:         storage.GamePhaseSetInProgress,
+		},
+		{
+			name: "in progress without active set falls back to between sets",
+			game: storage.Game{
+				Status: storage.GameStatusInProgress,
+			},
+			want: storage.GamePhaseBetweenSets,
+		},
+		{
+			name: "finished falls back to finished",
+			game: storage.Game{
+				Status: storage.GameStatusFinished,
+			},
+			want: storage.GamePhaseFinished,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.game.EffectivePhase(tc.hasActiveSet)
+			if got != tc.want {
+				t.Fatalf("EffectivePhase() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
