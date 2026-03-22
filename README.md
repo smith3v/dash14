@@ -60,6 +60,7 @@ Important: current template files in this repository are:
 - `templates/planned.html.tmpl`
 - `templates/live.html.tmpl`
 - `templates/intermission.html.tmpl`
+- `templates/finished.html.tmpl`
 
 So update overlay template paths accordingly.
 
@@ -76,6 +77,7 @@ overlay:
   planned_template_path: "templates/planned.html.tmpl"
   live_template_path: "templates/live.html.tmpl"
   intermission_template_path: "templates/intermission.html.tmpl"
+  finished_template_path: "templates/finished.html.tmpl"
   template_cache_refresh_interval_seconds: 0
   output_path: "runtime/out/overlay.html"
   logo_dir: "runtime/data/logos"
@@ -238,7 +240,7 @@ gofmt -w ./...
 
 - `--config is required`: provide `--config config.yaml`.
 - Template validation fails at startup:
-  - verify `overlay.planned_template_path`, `overlay.live_template_path`, and `overlay.intermission_template_path`
+  - verify `overlay.planned_template_path`, `overlay.live_template_path`, `overlay.intermission_template_path`, and `overlay.finished_template_path`
   - ensure files exist and are readable.
 - Template edits are not picked up:
   - by default templates are cached in memory for the lifetime of the process

@@ -37,6 +37,11 @@ type OverlayConfig struct {
 	// the standalone intermission scoreboard page.
 	IntermissionTemplatePath string `yaml:"intermission_template_path"`
 
+	// FinishedTemplatePath is the path to the HTML template rendered when a
+	// game has concluded and the final result should be shown on the main
+	// overlay output.
+	FinishedTemplatePath string `yaml:"finished_template_path"`
+
 	// OutputPath is where the rendered overlay HTML file is written. OBS
 	// reads this file as a Browser Source.
 	OutputPath string `yaml:"output_path"`

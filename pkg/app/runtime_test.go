@@ -76,6 +76,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	plannedTpl := filepath.Join(dir, "planned.tmpl")
 	liveTpl := filepath.Join(dir, "live.tmpl")
 	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
 	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}} vs {{.GuestTeamName}}"), 0o644); err != nil {
 		t.Fatalf("write planned template: %v", err)
 	}
@@ -84,6 +85,9 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	}
 	if err := os.WriteFile(intermissionTpl, []byte("intermission {{.HomeSetsWon}}-{{.GuestSetsWon}} {{range .SetScores}}set{{.SetNumber}} {{.HomeScore}}-{{.GuestScore}} {{end}}"), 0o644); err != nil {
 		t.Fatalf("write intermission template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
 	}
 
 	db, err := storage.Open(dbPath)
@@ -122,11 +126,12 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
-			PlannedTemplatePath:      plannedTpl,
-			LiveTemplatePath:         liveTpl,
-			IntermissionTemplatePath: intermissionTpl,
-			OutputPath:               outputPath,
-			LogoDir:                  filepath.Join(dir, "logos"),
+			PlannedTemplatePath:                 plannedTpl,
+			LiveTemplatePath:                    liveTpl,
+			IntermissionTemplatePath:            intermissionTpl,
+			FinishedTemplatePath:                finishedTpl,
+			OutputPath:                          outputPath,
+			LogoDir:                             filepath.Join(dir, "logos"),
 			TemplateCacheRefreshIntervalSeconds: 1,
 		},
 	}
@@ -170,11 +175,15 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	outputPath := filepath.Join(dir, "overlay", "current.html")
 	plannedTpl := filepath.Join(dir, "planned.tmpl")
 	liveTpl := filepath.Join(dir, "live.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
 	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}} vs {{.GuestTeamName}}"), 0o644); err != nil {
 		t.Fatalf("write planned template: %v", err)
 	}
 	if err := os.WriteFile(liveTpl, []byte("live {{.LeftTeamName}} {{.LeftScore}}"), 0o644); err != nil {
 		t.Fatalf("write live template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
 	}
 
 	db, err := storage.Open(dbPath)
@@ -213,10 +222,11 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
-			PlannedTemplatePath: plannedTpl,
-			LiveTemplatePath:    liveTpl,
-			OutputPath:          outputPath,
-			LogoDir:             filepath.Join(dir, "logos"),
+			PlannedTemplatePath:  plannedTpl,
+			LiveTemplatePath:     liveTpl,
+			FinishedTemplatePath: finishedTpl,
+			OutputPath:           outputPath,
+			LogoDir:              filepath.Join(dir, "logos"),
 		},
 	}
 
@@ -248,6 +258,7 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 	plannedTpl := filepath.Join(dir, "planned.tmpl")
 	liveTpl := filepath.Join(dir, "live.tmpl")
 	intermissionTpl := filepath.Join(dir, "intermission.html.tmpl")
+	finishedTpl := filepath.Join(dir, "finished.html.tmpl")
 	if err := os.WriteFile(plannedTpl, []byte("planned {{.HomeTeamName}} vs {{.GuestTeamName}}"), 0o644); err != nil {
 		t.Fatalf("write planned template: %v", err)
 	}
@@ -256,6 +267,9 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 	}
 	if err := os.WriteFile(intermissionTpl, []byte("intermission {{range .SetScores}}set{{.SetNumber}} {{.HomeScore}}-{{.GuestScore}} {{end}}"), 0o644); err != nil {
 		t.Fatalf("write intermission template: %v", err)
+	}
+	if err := os.WriteFile(finishedTpl, []byte("finished {{.HomeSetsWon}}-{{.GuestSetsWon}}"), 0o644); err != nil {
+		t.Fatalf("write finished template: %v", err)
 	}
 
 	db, err := storage.Open(dbPath)
@@ -316,6 +330,7 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 			PlannedTemplatePath:      plannedTpl,
 			LiveTemplatePath:         liveTpl,
 			IntermissionTemplatePath: intermissionTpl,
+			FinishedTemplatePath:     finishedTpl,
 			OutputPath:               outputPath,
 			LogoDir:                  filepath.Join(dir, "logos"),
 		},

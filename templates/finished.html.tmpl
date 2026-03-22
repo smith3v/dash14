@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dash14 Finished</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #fff;
+    }
+
+    .wrap {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 24px;
+      padding: 48px;
+      box-sizing: border-box;
+    }
+
+    .headline {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #f4c542;
+    }
+
+    .scoreline {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 24px;
+      align-items: center;
+      font-size: 44px;
+      font-weight: 700;
+    }
+
+    .team {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .team.right {
+      justify-content: flex-end;
+      text-align: right;
+    }
+
+    .team img {
+      width: 72px;
+      height: 72px;
+      object-fit: contain;
+    }
+
+    .sets {
+      font-size: 64px;
+      font-weight: 800;
+    }
+
+    .history {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 22px;
+    }
+
+    .set {
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="headline">Final Score</div>
+
+    <div class="scoreline">
+      <div class="team">
+        {{if .HomeTeamLogoPath}}<img src="{{.HomeTeamLogoPath}}" alt="{{.HomeTeamName}} logo">{{end}}
+        <div>{{.HomeTeamName}}</div>
+      </div>
+
+      <div class="sets">{{.HomeSetsWon}} - {{.GuestSetsWon}}</div>
+
+      <div class="team right">
+        <div>{{.GuestTeamName}}</div>
+        {{if .GuestTeamLogoPath}}<img src="{{.GuestTeamLogoPath}}" alt="{{.GuestTeamName}} logo">{{end}}
+      </div>
+    </div>
+
+    <div class="history">
+      {{range .SetScores}}
+      <div class="set">Set {{.SetNumber}} {{.HomeScore}}-{{.GuestScore}}</div>
+      {{end}}
+    </div>
+  </div>
+</body>
+</html>

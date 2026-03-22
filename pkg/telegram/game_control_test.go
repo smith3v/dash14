@@ -456,12 +456,13 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 }
 
 type blockingOverlayRenderer struct {
-	started      chan struct{}
-	release      chan struct{}
-	mu           sync.Mutex
-	plannedCount int
-	liveCountV   int
-	breakCount   int
+	started       chan struct{}
+	release       chan struct{}
+	mu            sync.Mutex
+	plannedCount  int
+	liveCountV    int
+	breakCount    int
+	finishedCount int
 }
 
 func (b *blockingOverlayRenderer) signalStarted() {
@@ -498,10 +499,19 @@ func (b *blockingOverlayRenderer) RenderIntermission(vm overlay.IntermissionView
 	return nil
 }
 
+func (b *blockingOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
+	b.signalStarted()
+	<-b.release
+	b.mu.Lock()
+	b.finishedCount++
+	b.mu.Unlock()
+	return nil
+}
+
 func (b *blockingOverlayRenderer) totalCalls() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.plannedCount + b.liveCountV + b.breakCount
+	return b.plannedCount + b.liveCountV + b.breakCount + b.finishedCount
 }
 
 type saveFailGames struct {
@@ -510,15 +520,21 @@ type saveFailGames struct {
 	failSaveSet  bool
 }
 
-func (g *saveFailGames) CreateGame(game *storage.Game) error                  { return g.inner.CreateGame(game) }
-func (g *saveFailGames) CreateSet(set *storage.GameSet) error                  { return g.inner.CreateSet(set) }
-func (g *saveFailGames) GetCurrentGame() (*storage.Game, error)                { return g.inner.GetCurrentGame() }
-func (g *saveFailGames) GetNonFinishedGame() (*storage.Game, error)            { return g.inner.GetNonFinishedGame() }
-func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error)            { return g.inner.GetGameByID(id) }
-func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error)    { return g.inner.GetActiveSet(gameID) }
-func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) { return g.inner.ListSetsByGameID(gameID) }
-func (g *saveFailGames) SetCurrentGameID(id uint) error                        { return g.inner.SetCurrentGameID(id) }
-func (g *saveFailGames) ClearCurrentGameID() error                             { return g.inner.ClearCurrentGameID() }
+func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
+func (g *saveFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
+func (g *saveFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
+func (g *saveFailGames) GetNonFinishedGame() (*storage.Game, error) {
+	return g.inner.GetNonFinishedGame()
+}
+func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
+func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
+	return g.inner.GetActiveSet(gameID)
+}
+func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
+	return g.inner.ListSetsByGameID(gameID)
+}
+func (g *saveFailGames) SetCurrentGameID(id uint) error { return g.inner.SetCurrentGameID(id) }
+func (g *saveFailGames) ClearCurrentGameID() error      { return g.inner.ClearCurrentGameID() }
 
 func (g *saveFailGames) SaveGame(game *storage.Game) error {
 	if g.failSaveGame {

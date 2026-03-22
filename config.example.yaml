@@ -26,6 +26,10 @@ overlay:
   # standalone intermission scoreboard page.
   intermission_template_path: "templates/intermission.html.tmpl"
 
+  # finished_template_path is the HTML template rendered on the main overlay
+  # when the game is over and the final result should be shown.
+  finished_template_path: "templates/finished.html.tmpl"
+
   # output_path is where the rendered overlay HTML file is written.
   # Point your OBS Browser Source at this file.
   output_path: "runtime/out/overlay.html"

@@ -36,6 +36,7 @@ overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
   intermission_template_path: "templates/intermission.html"
+  finished_template_path: "templates/finished.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
   template_cache_refresh_interval_seconds: 60
@@ -73,6 +74,9 @@ func TestLoad_ValidYAML(t *testing.T) {
 	}
 	if cfg.Overlay.IntermissionTemplatePath != "templates/intermission.html" {
 		t.Errorf("Overlay.IntermissionTemplatePath = %q, want %q", cfg.Overlay.IntermissionTemplatePath, "templates/intermission.html")
+	}
+	if cfg.Overlay.FinishedTemplatePath != "templates/finished.html" {
+		t.Errorf("Overlay.FinishedTemplatePath = %q, want %q", cfg.Overlay.FinishedTemplatePath, "templates/finished.html")
 	}
 	if cfg.Overlay.OutputPath != "out/overlay.html" {
 		t.Errorf("Overlay.OutputPath = %q, want %q", cfg.Overlay.OutputPath, "out/overlay.html")
@@ -188,6 +192,7 @@ overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
   intermission_template_path: "templates/intermission.html"
+  finished_template_path: "templates/finished.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
 logging:
@@ -230,6 +235,7 @@ overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
   intermission_template_path: "templates/intermission.html"
+  finished_template_path: "templates/finished.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
 `,
@@ -246,6 +252,7 @@ overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
   intermission_template_path: "templates/intermission.html"
+  finished_template_path: "templates/finished.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
   template_cache_refresh_interval_seconds: 30
@@ -287,6 +294,23 @@ overlay:
 			wantErrSubs: []string{"overlay.intermission_template_path"},
 		},
 		{
+			name: "missing finished template path",
+			content: `
+telegram:
+  token: "bot-token-123"
+sqlite:
+  path: "var/dash14.db"
+overlay:
+  planned_template_path: "templates/planned.html"
+  live_template_path: "templates/live.html"
+  intermission_template_path: "templates/intermission.html"
+  output_path: "out/overlay.html"
+  logo_dir: "var/logos"
+`,
+			wantErr:     true,
+			wantErrSubs: []string{"overlay.finished_template_path"},
+		},
+		{
 			name: "missing planned template path",
 			content: `
 telegram:
@@ -319,15 +343,16 @@ overlay:
 			wantErrSubs: []string{"overlay.live_template_path"},
 		},
 		{
-			name:        "missing both telegram token and sqlite path",
-			content:     `{}`,
-			wantErr:     true,
+			name:    "missing both telegram token and sqlite path",
+			content: `{}`,
+			wantErr: true,
 			wantErrSubs: []string{
 				"telegram.token",
 				"sqlite.path",
 				"overlay.planned_template_path",
 				"overlay.live_template_path",
 				"overlay.intermission_template_path",
+				"overlay.finished_template_path",
 			},
 		},
 		{
@@ -341,6 +366,7 @@ overlay:
   planned_template_path: "templates/planned.html"
   live_template_path: "templates/live.html"
   intermission_template_path: "templates/intermission.html"
+  finished_template_path: "templates/finished.html"
   output_path: "out/overlay.html"
   logo_dir: "var/logos"
   template_cache_refresh_interval_seconds: -1

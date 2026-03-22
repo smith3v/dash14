@@ -53,6 +53,9 @@ func (c Config) ValidateRuntime() error {
 	if c.Overlay.IntermissionTemplatePath == "" {
 		errs = append(errs, errors.New("overlay.intermission_template_path is required"))
 	}
+	if c.Overlay.FinishedTemplatePath == "" {
+		errs = append(errs, errors.New("overlay.finished_template_path is required"))
+	}
 	if c.Overlay.TemplateCacheRefreshIntervalSeconds < 0 {
 		errs = append(errs, errors.New("overlay.template_cache_refresh_interval_seconds must be >= 0"))
 	}

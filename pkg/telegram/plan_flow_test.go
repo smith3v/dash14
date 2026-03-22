@@ -27,6 +27,7 @@ type fakeOverlayRenderer struct {
 	planned      []overlay.PlannedViewModel
 	live         []overlay.LiveViewModel
 	intermission []overlay.IntermissionViewModel
+	finished     []overlay.FinishedViewModel
 }
 
 func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
@@ -47,6 +48,13 @@ func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewMode
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.intermission = append(f.intermission, vm)
+	return nil
+}
+
+func (f *fakeOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.finished = append(f.finished, vm)
 	return nil
 }
 

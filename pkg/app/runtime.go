@@ -151,6 +151,9 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
 		return err
 	}
+	if _, err := os.Stat(cfg.FinishedTemplatePath); err != nil {
+		return err
+	}
 	return nil
 }
 

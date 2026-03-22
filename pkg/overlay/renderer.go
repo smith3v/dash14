@@ -40,6 +40,7 @@ type rendererTemplates struct {
 	planned      *template.Template
 	live         *template.Template
 	intermission *template.Template
+	finished     *template.Template
 }
 
 func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
@@ -71,11 +72,16 @@ func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) 
 	if err != nil {
 		return rendererTemplates{}, err
 	}
+	finished, err := parse(cfg.FinishedTemplatePath, "finished")
+	if err != nil {
+		return rendererTemplates{}, err
+	}
 
 	return rendererTemplates{
 		planned:      planned,
 		live:         live,
 		intermission: intermission,
+		finished:     finished,
 	}, nil
 }
 
@@ -144,6 +150,15 @@ func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
 		return err
 	}
 	return r.renderToPath(r.templateSnapshot().intermission, vm, r.intermissionOutputPath())
+}
+
+// RenderFinished renders the cached finished template to the configured main
+// overlay output path.
+func (r *Renderer) RenderFinished(vm FinishedViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+	return r.renderToPath(r.templateSnapshot().finished, vm, r.cfg.OutputPath)
 }
 
 // renderToPath executes tmpl with data and writes the result atomically to
