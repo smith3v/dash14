@@ -1,5 +1,12 @@
 package game
 
+const (
+	PhasePlanned       = "planned"
+	PhaseSetInProgress = "set_in_progress"
+	PhaseBetweenSets   = "between_sets"
+	PhaseFinished      = "finished"
+)
+
 // SetScore represents the score state of a single set.
 type SetScore struct {
 	HomeScore          int
@@ -26,6 +33,7 @@ type GameState struct {
 	GuestSetsWon       int
 	CurrentSetNumber   int
 	Status             string // "planned", "in_progress", "finished"
+	Phase              string // "planned", "set_in_progress", "between_sets", "finished"
 	SideSwitchedInSet5 bool   // propagated to SetScore when set 5 starts
 }
 

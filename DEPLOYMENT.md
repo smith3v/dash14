@@ -101,11 +101,12 @@ These paths match the current image and compose wiring:
 - `./runtime/logs` -> `/logs`
 - templates are baked into the image at `/app/templates`
 
-Set all three overlay template paths in `deploy/config/config.container.yaml`:
+Set all four overlay template paths in `deploy/config/config.container.yaml`:
 
 - `overlay.planned_template_path: /app/templates/planned.html.tmpl`
 - `overlay.live_template_path: /app/templates/live.html.tmpl`
 - `overlay.intermission_template_path: /app/templates/intermission.html.tmpl`
+- `overlay.finished_template_path: /app/templates/finished.html.tmpl`
 
 The app itself is not an HTTP server. It only writes files to `/out`, and `nginx` serves those files.
 

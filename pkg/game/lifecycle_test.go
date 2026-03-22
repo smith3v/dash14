@@ -2,17 +2,12 @@ package game
 
 import "testing"
 
-// TestStartPlannedGame verifies that StartPlannedGame transitions the game to
-// in_progress and returns a fresh set 1 with score 0-0.
 func TestStartPlannedGame(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      GameState
-		wantStatus string
-		wantSetNum int
-		wantHome   int
-		wantGuest  int
-		wantErr    bool
+		name      string
+		input     GameState
+		wantPhase string
+		wantErr   bool
 	}{
 		{
 			name: "planned game starts correctly",
@@ -22,24 +17,30 @@ func TestStartPlannedGame(t *testing.T) {
 				HomeSide:    "left",
 				GuestSide:   "right",
 				Status:      "planned",
+				Phase:       PhasePlanned,
 			},
-			wantStatus: "in_progress",
-			wantSetNum: 1,
-			wantHome:   0,
-			wantGuest:  0,
-			wantErr:    false,
+			wantPhase: PhaseSetInProgress,
 		},
 		{
-			name: "in_progress game returns error",
+			name: "legacy planned status without explicit phase still starts",
+			input: GameState{
+				Status: "planned",
+			},
+			wantPhase: PhaseSetInProgress,
+		},
+		{
+			name: "already live returns error",
 			input: GameState{
 				Status: "in_progress",
+				Phase:  PhaseSetInProgress,
 			},
 			wantErr: true,
 		},
 		{
-			name: "finished game returns error",
+			name: "finished returns error",
 			input: GameState{
 				Status: "finished",
+				Phase:  PhaseFinished,
 			},
 			wantErr: true,
 		},
@@ -51,139 +52,112 @@ func TestStartPlannedGame(t *testing.T) {
 
 			if tc.wantErr {
 				if err == nil {
-					t.Errorf("expected error, got nil")
+					t.Fatal("expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if g.Status != tc.wantStatus {
-				t.Errorf("Status: got %q, want %q", g.Status, tc.wantStatus)
+			if g.Status != "in_progress" {
+				t.Fatalf("Status: got %q, want %q", g.Status, "in_progress")
 			}
-			if g.CurrentSetNumber != tc.wantSetNum {
-				t.Errorf("CurrentSetNumber: got %d, want %d", g.CurrentSetNumber, tc.wantSetNum)
+			if g.Phase != tc.wantPhase {
+				t.Fatalf("Phase: got %q, want %q", g.Phase, tc.wantPhase)
 			}
-			if s.SetNumber != tc.wantSetNum {
-				t.Errorf("SetState.SetNumber: got %d, want %d", s.SetNumber, tc.wantSetNum)
+			if g.CurrentSetNumber != 1 {
+				t.Fatalf("CurrentSetNumber: got %d, want 1", g.CurrentSetNumber)
 			}
-			if s.HomeScore != tc.wantHome {
-				t.Errorf("SetState.HomeScore: got %d, want %d", s.HomeScore, tc.wantHome)
-			}
-			if s.GuestScore != tc.wantGuest {
-				t.Errorf("SetState.GuestScore: got %d, want %d", s.GuestScore, tc.wantGuest)
-			}
-			if s.IsFinished {
-				t.Errorf("SetState.IsFinished: got true, want false")
-			}
-			if g.HomeSetsWon != 0 || g.GuestSetsWon != 0 {
-				t.Errorf("sets won should be 0-0, got home=%d guest=%d",
-					g.HomeSetsWon, g.GuestSetsWon)
+			if s.SetNumber != 1 || s.HomeScore != 0 || s.GuestScore != 0 || s.IsFinished {
+				t.Fatalf("unexpected initial set state: %+v", s)
 			}
 		})
 	}
 }
 
-// TestConfirmSetFinished_NextSetCreated verifies that after a finishable set
-// is confirmed, the next set is created with an incremented set number and
-// the overlay sides are swapped.
-func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
+func TestConfirmSetFinished(t *testing.T) {
 	tests := []struct {
 		name             string
 		game             GameState
 		set              SetState
-		wantNextSetNum   int
-		wantHomeSide     string
-		wantGuestSide    string
+		wantPhase        string
 		wantHomeSetsWon  int
 		wantGuestSetsWon int
 		wantPromptFinish bool
+		wantCurrentSet   int
 		wantErr          bool
 	}{
 		{
-			name: "home wins set 1, sides swap, set 2 created",
+			name: "home wins and game enters between_sets",
 			game: GameState{
 				Status:           "in_progress",
+				Phase:            PhaseSetInProgress,
 				HomeSide:         "left",
 				GuestSide:        "right",
-				CurrentSetNumber: 1,
-				HomeSetsWon:      0,
-				GuestSetsWon:     0,
+				CurrentSetNumber: 3,
+				HomeSetsWon:      1,
+				GuestSetsWon:     1,
 			},
 			set: SetState{
 				SetScore: SetScore{
 					HomeScore:  25,
 					GuestScore: 20,
-					SetNumber:  1,
+					SetNumber:  3,
 				},
 			},
-			wantNextSetNum:   2,
-			wantHomeSide:     "right",
-			wantGuestSide:    "left",
-			wantHomeSetsWon:  1,
-			wantGuestSetsWon: 0,
-			wantPromptFinish: false,
-			wantErr:          false,
-		},
-		{
-			name: "guest wins set 2, sides swap back, set 3 created",
-			game: GameState{
-				Status:           "in_progress",
-				HomeSide:         "right",
-				GuestSide:        "left",
-				CurrentSetNumber: 2,
-				HomeSetsWon:      1,
-				GuestSetsWon:     0,
-			},
-			set: SetState{
-				SetScore: SetScore{
-					HomeScore:  20,
-					GuestScore: 25,
-					SetNumber:  2,
-				},
-			},
-			wantNextSetNum:   3,
-			wantHomeSide:     "left",
-			wantGuestSide:    "right",
-			wantHomeSetsWon:  1,
+			wantPhase:        PhaseBetweenSets,
+			wantHomeSetsWon:  2,
 			wantGuestSetsWon: 1,
-			wantPromptFinish: false,
-			wantErr:          false,
+			wantCurrentSet:   3,
 		},
 		{
-			name: "home wins set 3, still creates set 4",
+			name: "finish-eligible set still stays between_sets and prompts finish",
 			game: GameState{
 				Status:           "in_progress",
+				Phase:            PhaseSetInProgress,
 				HomeSide:         "left",
 				GuestSide:        "right",
-				CurrentSetNumber: 3,
+				CurrentSetNumber: 4,
 				HomeSetsWon:      2,
-				GuestSetsWon:     0,
+				GuestSetsWon:     1,
 			},
 			set: SetState{
 				SetScore: SetScore{
 					HomeScore:  25,
-					GuestScore: 21,
-					SetNumber:  3,
+					GuestScore: 18,
+					SetNumber:  4,
 				},
 			},
-			wantNextSetNum:   4,
-			wantHomeSide:     "right",
-			wantGuestSide:    "left",
+			wantPhase:        PhaseBetweenSets,
 			wantHomeSetsWon:  3,
+			wantGuestSetsWon: 1,
+			wantPromptFinish: true,
+			wantCurrentSet:   4,
+		},
+		{
+			name: "legacy in_progress status without explicit phase still works",
+			game: GameState{
+				Status:           "in_progress",
+				CurrentSetNumber: 1,
+			},
+			set: SetState{
+				SetScore: SetScore{
+					HomeScore:  25,
+					GuestScore: 22,
+					SetNumber:  1,
+				},
+			},
+			wantPhase:        PhaseBetweenSets,
+			wantHomeSetsWon:  1,
 			wantGuestSetsWon: 0,
-			wantPromptFinish: false,
-			wantErr:          false,
+			wantCurrentSet:   1,
 		},
 		{
 			name: "not finishable score returns error",
 			game: GameState{
-				Status:           "in_progress",
-				HomeSide:         "left",
-				GuestSide:        "right",
-				CurrentSetNumber: 1,
+				Status: "in_progress",
+				Phase:  PhaseSetInProgress,
 			},
 			set: SetState{
 				SetScore: SetScore{
@@ -195,12 +169,10 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "already finished set returns error",
+			name: "wrong phase returns error",
 			game: GameState{
-				Status:           "in_progress",
-				HomeSide:         "left",
-				GuestSide:        "right",
-				CurrentSetNumber: 1,
+				Status: "in_progress",
+				Phase:  PhaseBetweenSets,
 			},
 			set: SetState{
 				SetScore: SetScore{
@@ -208,35 +180,8 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 					GuestScore: 20,
 					SetNumber:  1,
 				},
-				IsFinished: true,
 			},
 			wantErr: true,
-		},
-		{
-			name: "set 4 at 2-2 creates set 5 with SideSwitchedInSet5 from game",
-			game: GameState{
-				Status:             "in_progress",
-				HomeSide:           "left",
-				GuestSide:          "right",
-				CurrentSetNumber:   4,
-				HomeSetsWon:        2,
-				GuestSetsWon:       1,
-				SideSwitchedInSet5: false,
-			},
-			set: SetState{
-				SetScore: SetScore{
-					HomeScore:  20,
-					GuestScore: 25,
-					SetNumber:  4,
-				},
-			},
-			wantNextSetNum:   5,
-			wantHomeSide:     "right",
-			wantGuestSide:    "left",
-			wantHomeSetsWon:  2,
-			wantGuestSetsWon: 2,
-			wantPromptFinish: false,
-			wantErr:          false,
 		},
 	}
 
@@ -246,193 +191,187 @@ func TestConfirmSetFinished_NextSetCreated(t *testing.T) {
 
 			if tc.wantErr {
 				if err == nil {
-					t.Errorf("expected error, got nil")
+					t.Fatal("expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if result.PromptFinish != tc.wantPromptFinish {
-				t.Errorf("PromptFinish: got %v, want %v", result.PromptFinish, tc.wantPromptFinish)
+			if result.Game.Phase != tc.wantPhase {
+				t.Fatalf("Game.Phase: got %q, want %q", result.Game.Phase, tc.wantPhase)
 			}
-
+			if result.Game.CurrentSetNumber != tc.wantCurrentSet {
+				t.Fatalf("CurrentSetNumber: got %d, want %d", result.Game.CurrentSetNumber, tc.wantCurrentSet)
+			}
 			if result.Game.HomeSetsWon != tc.wantHomeSetsWon {
-				t.Errorf("HomeSetsWon: got %d, want %d", result.Game.HomeSetsWon, tc.wantHomeSetsWon)
+				t.Fatalf("HomeSetsWon: got %d, want %d", result.Game.HomeSetsWon, tc.wantHomeSetsWon)
 			}
 			if result.Game.GuestSetsWon != tc.wantGuestSetsWon {
-				t.Errorf("GuestSetsWon: got %d, want %d", result.Game.GuestSetsWon, tc.wantGuestSetsWon)
+				t.Fatalf("GuestSetsWon: got %d, want %d", result.Game.GuestSetsWon, tc.wantGuestSetsWon)
 			}
-
-			if tc.wantPromptFinish {
-				if result.NextSet != nil {
-					t.Errorf("NextSet: got non-nil, want nil when PromptFinish=true")
-				}
-				return
+			if result.PromptFinish != tc.wantPromptFinish {
+				t.Fatalf("PromptFinish: got %v, want %v", result.PromptFinish, tc.wantPromptFinish)
 			}
-
-			if result.NextSet == nil {
-				t.Fatalf("NextSet: got nil, want non-nil")
-			}
-			if result.NextSet.SetNumber != tc.wantNextSetNum {
-				t.Errorf("NextSet.SetNumber: got %d, want %d",
-					result.NextSet.SetNumber, tc.wantNextSetNum)
-			}
-			if result.NextSet.IsFinished {
-				t.Errorf("NextSet.IsFinished: got true, want false")
-			}
-			if result.NextSet.HomeScore != 0 || result.NextSet.GuestScore != 0 {
-				t.Errorf("NextSet score: got %d-%d, want 0-0",
-					result.NextSet.HomeScore, result.NextSet.GuestScore)
-			}
-			if result.Game.HomeSide != tc.wantHomeSide {
-				t.Errorf("HomeSide: got %q, want %q", result.Game.HomeSide, tc.wantHomeSide)
-			}
-			if result.Game.GuestSide != tc.wantGuestSide {
-				t.Errorf("GuestSide: got %q, want %q", result.Game.GuestSide, tc.wantGuestSide)
-			}
-			if result.Game.CurrentSetNumber != tc.wantNextSetNum {
-				t.Errorf("CurrentSetNumber: got %d, want %d",
-					result.Game.CurrentSetNumber, tc.wantNextSetNum)
+			if result.NextSet != nil {
+				t.Fatalf("NextSet: got %+v, want nil", result.NextSet)
 			}
 		})
 	}
 }
 
-// TestConfirmSetFinished_PromptFinish verifies that when set-finish rules make
-// the match finish-eligible, PromptFinish is true and NextSet is nil — the app does not
-// auto-finish the match.
-func TestConfirmSetFinished_PromptFinish(t *testing.T) {
+func TestStartNextSet(t *testing.T) {
 	tests := []struct {
-		name             string
-		game             GameState
-		set              SetState
-		wantHomeSetsWon  int
-		wantGuestSetsWon int
+		name          string
+		game          GameState
+		wantPhase     string
+		wantSetNumber int
+		wantHomeSide  string
+		wantGuestSide string
+		wantCarrySide bool
+		wantErr       bool
 	}{
 		{
-			name: "home team wins set 4 after already leading 3-0",
+			name: "between sets starts next set and swaps sides",
 			game: GameState{
 				Status:           "in_progress",
+				Phase:            PhaseBetweenSets,
 				HomeSide:         "left",
 				GuestSide:        "right",
-				CurrentSetNumber: 4,
-				HomeSetsWon:      3,
-				GuestSetsWon:     0,
+				CurrentSetNumber: 2,
+				HomeSetsWon:      1,
+				GuestSetsWon:     1,
 			},
-			set: SetState{
-				SetScore: SetScore{
-					HomeScore:  25,
-					GuestScore: 18,
-					SetNumber:  4,
-				},
-			},
-			wantHomeSetsWon:  4,
-			wantGuestSetsWon: 0,
+			wantPhase:     PhaseSetInProgress,
+			wantSetNumber: 3,
+			wantHomeSide:  "right",
+			wantGuestSide: "left",
 		},
 		{
-			name: "guest team wins 3rd set",
+			name: "starting set 5 carries side-switched flag",
+			game: GameState{
+				Status:             "in_progress",
+				Phase:              PhaseBetweenSets,
+				HomeSide:           "left",
+				GuestSide:          "right",
+				CurrentSetNumber:   4,
+				HomeSetsWon:        2,
+				GuestSetsWon:       2,
+				SideSwitchedInSet5: true,
+			},
+			wantPhase:     PhaseSetInProgress,
+			wantSetNumber: 5,
+			wantHomeSide:  "right",
+			wantGuestSide: "left",
+			wantCarrySide: true,
+		},
+		{
+			name: "legacy in_progress status without explicit phase is rejected",
 			game: GameState{
 				Status:           "in_progress",
-				HomeSide:         "right",
-				GuestSide:        "left",
-				CurrentSetNumber: 5,
-				HomeSetsWon:      2,
-				GuestSetsWon:     2,
+				CurrentSetNumber: 3,
 			},
-			set: SetState{
-				SetScore: SetScore{
-					HomeScore:  13,
-					GuestScore: 15,
-					SetNumber:  5,
-				},
+			wantErr: true,
+		},
+		{
+			name: "finish-eligible game cannot start another set",
+			game: GameState{
+				Status:       "in_progress",
+				Phase:        PhaseBetweenSets,
+				HomeSetsWon:  3,
+				GuestSetsWon: 1,
 			},
-			wantHomeSetsWon:  2,
-			wantGuestSetsWon: 3,
+			wantErr: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ConfirmSetFinished(tc.game, tc.set)
+			g, s, err := StartNextSet(tc.game)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if !result.PromptFinish {
-				t.Errorf("PromptFinish: got false, want true")
+			if g.Phase != tc.wantPhase {
+				t.Fatalf("Game.Phase: got %q, want %q", g.Phase, tc.wantPhase)
 			}
-			if result.NextSet != nil {
-				t.Errorf("NextSet: got non-nil, want nil — app must not auto-finish")
+			if g.CurrentSetNumber != tc.wantSetNumber {
+				t.Fatalf("CurrentSetNumber: got %d, want %d", g.CurrentSetNumber, tc.wantSetNumber)
 			}
-			if result.Game.Status == "finished" {
-				t.Errorf("Game.Status: got %q — app must not auto-finish", result.Game.Status)
+			if g.HomeSide != tc.wantHomeSide || g.GuestSide != tc.wantGuestSide {
+				t.Fatalf("unexpected side swap: home=%q guest=%q", g.HomeSide, g.GuestSide)
 			}
-			if result.Game.HomeSetsWon != tc.wantHomeSetsWon {
-				t.Errorf("HomeSetsWon: got %d, want %d",
-					result.Game.HomeSetsWon, tc.wantHomeSetsWon)
+			if s.SetNumber != tc.wantSetNumber || s.HomeScore != 0 || s.GuestScore != 0 || s.IsFinished {
+				t.Fatalf("unexpected next set state: %+v", s)
 			}
-			if result.Game.GuestSetsWon != tc.wantGuestSetsWon {
-				t.Errorf("GuestSetsWon: got %d, want %d",
-					result.Game.GuestSetsWon, tc.wantGuestSetsWon)
+			if s.SideSwitchedInSet5 != tc.wantCarrySide {
+				t.Fatalf("SideSwitchedInSet5: got %v, want %v", s.SideSwitchedInSet5, tc.wantCarrySide)
 			}
 		})
 	}
 }
 
-// TestConfirmGameFinished verifies that ConfirmGameFinished sets status to
-// "finished" only when the game is finish-eligible under the set-count rules.
 func TestConfirmGameFinished(t *testing.T) {
 	tests := []struct {
 		name       string
 		game       GameState
 		wantStatus string
+		wantPhase  string
 		wantErr    bool
 	}{
 		{
-			name: "home team has 3-1 after four completed sets — finishes successfully",
+			name: "between sets and finish eligible succeeds",
+			game: GameState{
+				Status:       "in_progress",
+				Phase:        PhaseBetweenSets,
+				HomeSetsWon:  3,
+				GuestSetsWon: 1,
+			},
+			wantStatus: "finished",
+			wantPhase:  PhaseFinished,
+		},
+		{
+			name: "legacy finish eligible without explicit phase is rejected",
 			game: GameState{
 				Status:       "in_progress",
 				HomeSetsWon:  3,
 				GuestSetsWon: 1,
 			},
-			wantStatus: "finished",
-			wantErr:    false,
+			wantErr: true,
 		},
 		{
-			name: "guest team has 3-2 after five completed sets — finishes successfully",
+			name: "live phase cannot be finished directly",
 			game: GameState{
 				Status:       "in_progress",
-				HomeSetsWon:  2,
-				GuestSetsWon: 3,
-			},
-			wantStatus: "finished",
-			wantErr:    false,
-		},
-		{
-			name: "3-0 after three completed sets is not finish-eligible yet",
-			game: GameState{
-				Status:       "in_progress",
+				Phase:        PhaseSetInProgress,
 				HomeSetsWon:  3,
-				GuestSetsWon: 0,
+				GuestSetsWon: 1,
 			},
 			wantErr: true,
 		},
 		{
-			name: "2-2 after four completed sets is not finish-eligible yet",
+			name: "not finish eligible returns error",
 			game: GameState{
 				Status:       "in_progress",
+				Phase:        PhaseBetweenSets,
 				HomeSetsWon:  2,
 				GuestSetsWon: 2,
 			},
 			wantErr: true,
 		},
 		{
-			name: "already finished — error returned",
+			name: "already finished returns error",
 			game: GameState{
 				Status:       "finished",
+				Phase:        PhaseFinished,
 				HomeSetsWon:  3,
 				GuestSetsWon: 1,
 			},
@@ -446,113 +385,50 @@ func TestConfirmGameFinished(t *testing.T) {
 
 			if tc.wantErr {
 				if err == nil {
-					t.Errorf("expected error, got nil")
+					t.Fatal("expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			if result.Game.Status != tc.wantStatus {
-				t.Errorf("Status: got %q, want %q", result.Game.Status, tc.wantStatus)
+				t.Fatalf("Status: got %q, want %q", result.Game.Status, tc.wantStatus)
+			}
+			if result.Game.Phase != tc.wantPhase {
+				t.Fatalf("Phase: got %q, want %q", result.Game.Phase, tc.wantPhase)
 			}
 		})
 	}
 }
 
-// TestReverseOverlaySides verifies that ReverseOverlaySides swaps HomeSide
-// and GuestSide correctly.
 func TestReverseOverlaySides(t *testing.T) {
-	tests := []struct {
-		name          string
-		game          GameState
-		wantHomeSide  string
-		wantGuestSide string
-	}{
-		{
-			name: "left-right becomes right-left",
-			game: GameState{
-				HomeSide:  "left",
-				GuestSide: "right",
-			},
-			wantHomeSide:  "right",
-			wantGuestSide: "left",
-		},
-		{
-			name: "right-left becomes left-right",
-			game: GameState{
-				HomeSide:  "right",
-				GuestSide: "left",
-			},
-			wantHomeSide:  "left",
-			wantGuestSide: "right",
-		},
-		{
-			name: "other fields preserved after reverse",
-			game: GameState{
-				HomeTeamID:       1,
-				GuestTeamID:      2,
-				HomeSide:         "left",
-				GuestSide:        "right",
-				HomeSetsWon:      1,
-				GuestSetsWon:     2,
-				CurrentSetNumber: 4,
-				Status:           "in_progress",
-			},
-			wantHomeSide:  "right",
-			wantGuestSide: "left",
-		},
+	result := ReverseOverlaySides(GameState{
+		HomeSide:         "left",
+		GuestSide:        "right",
+		CurrentSetNumber: 4,
+		Status:           "in_progress",
+		Phase:            PhaseSetInProgress,
+	})
+
+	if result.Game.HomeSide != "right" || result.Game.GuestSide != "left" {
+		t.Fatalf("unexpected side reversal: %+v", result.Game)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := ReverseOverlaySides(tc.game)
-
-			if result.Game.HomeSide != tc.wantHomeSide {
-				t.Errorf("HomeSide: got %q, want %q", result.Game.HomeSide, tc.wantHomeSide)
-			}
-			if result.Game.GuestSide != tc.wantGuestSide {
-				t.Errorf("GuestSide: got %q, want %q", result.Game.GuestSide, tc.wantGuestSide)
-			}
-
-			// Verify the original is not mutated (value semantics).
-			if tc.game.HomeSide == result.Game.HomeSide && tc.game.HomeSide != tc.game.GuestSide {
-				t.Errorf("original GameState appears mutated (HomeSide unchanged)")
-			}
-		})
+	if result.Game.CurrentSetNumber != 4 || result.Game.Phase != PhaseSetInProgress {
+		t.Fatalf("unexpected mutation of other fields: %+v", result.Game)
 	}
 }
 
-// TestIsSetFinishable verifies the exported helper behaves identically to
-// the internal isFinishable function.
 func TestIsSetFinishable(t *testing.T) {
 	tests := []struct {
 		name string
 		set  SetScore
 		want bool
 	}{
-		{
-			name: "set 1: 25-23 finishable",
-			set:  SetScore{HomeScore: 25, GuestScore: 23, SetNumber: 1},
-			want: true,
-		},
-		{
-			name: "set 1: 25-24 not finishable",
-			set:  SetScore{HomeScore: 25, GuestScore: 24, SetNumber: 1},
-			want: false,
-		},
-		{
-			name: "set 5: 15-13 finishable",
-			set:  SetScore{HomeScore: 15, GuestScore: 13, SetNumber: 5},
-			want: true,
-		},
-		{
-			name: "set 5: 15-14 not finishable",
-			set:  SetScore{HomeScore: 15, GuestScore: 14, SetNumber: 5},
-			want: false,
-		},
+		{name: "set 1: 25-23 finishable", set: SetScore{HomeScore: 25, GuestScore: 23, SetNumber: 1}, want: true},
+		{name: "set 1: 25-24 not finishable", set: SetScore{HomeScore: 25, GuestScore: 24, SetNumber: 1}, want: false},
+		{name: "set 5: 15-13 finishable", set: SetScore{HomeScore: 15, GuestScore: 13, SetNumber: 5}, want: true},
+		{name: "set 5: 15-14 not finishable", set: SetScore{HomeScore: 15, GuestScore: 14, SetNumber: 5}, want: false},
 	}
 
 	for _, tc := range tests {
@@ -571,26 +447,10 @@ func TestIsGameFinishEligible(t *testing.T) {
 		game GameState
 		want bool
 	}{
-		{
-			name: "3-0 after three sets is not eligible",
-			game: GameState{HomeSetsWon: 3, GuestSetsWon: 0},
-			want: false,
-		},
-		{
-			name: "3-1 after four sets is eligible",
-			game: GameState{HomeSetsWon: 3, GuestSetsWon: 1},
-			want: true,
-		},
-		{
-			name: "2-2 after four sets is not eligible",
-			game: GameState{HomeSetsWon: 2, GuestSetsWon: 2},
-			want: false,
-		},
-		{
-			name: "3-2 after five sets is eligible",
-			game: GameState{HomeSetsWon: 3, GuestSetsWon: 2},
-			want: true,
-		},
+		{name: "3-0 after three sets is not eligible", game: GameState{HomeSetsWon: 3, GuestSetsWon: 0}, want: false},
+		{name: "3-1 after four sets is eligible", game: GameState{HomeSetsWon: 3, GuestSetsWon: 1}, want: true},
+		{name: "2-2 after four sets is not eligible", game: GameState{HomeSetsWon: 2, GuestSetsWon: 2}, want: false},
+		{name: "3-2 after five sets is eligible", game: GameState{HomeSetsWon: 3, GuestSetsWon: 2}, want: true},
 	}
 
 	for _, tc := range tests {
@@ -600,44 +460,5 @@ func TestIsGameFinishEligible(t *testing.T) {
 				t.Errorf("IsGameFinishEligible(%+v) = %v, want %v", tc.game, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestSet5SideSwitchedCarryOver verifies that when set 5 is created via
-// ConfirmSetFinished, the SideSwitchedInSet5 flag from the game state is
-// carried into the new SetState.
-func TestSet5SideSwitchedCarryOver(t *testing.T) {
-	game := GameState{
-		Status:             "in_progress",
-		HomeSide:           "left",
-		GuestSide:          "right",
-		CurrentSetNumber:   4,
-		HomeSetsWon:        1,
-		GuestSetsWon:       2,
-		SideSwitchedInSet5: false,
-	}
-	set := SetState{
-		SetScore: SetScore{
-			HomeScore:  25,
-			GuestScore: 22,
-			SetNumber:  4,
-		},
-	}
-
-	result, err := ConfirmSetFinished(game, set)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.NextSet == nil {
-		t.Fatalf("NextSet is nil, expected set 5 to be created")
-	}
-	if result.NextSet.SetNumber != 5 {
-		t.Errorf("NextSet.SetNumber: got %d, want 5", result.NextSet.SetNumber)
-	}
-	// SideSwitchedInSet5 should come from game.SideSwitchedInSet5 (false here).
-	if result.NextSet.SideSwitchedInSet5 != game.SideSwitchedInSet5 {
-		t.Errorf("NextSet.SideSwitchedInSet5: got %v, want %v",
-			result.NextSet.SideSwitchedInSet5, game.SideSwitchedInSet5)
 	}
 }

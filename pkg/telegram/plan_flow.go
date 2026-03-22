@@ -385,6 +385,7 @@ func (r *Router) finalizePlannedGame(
 		GuestTeamSide:      "right",
 		CurrentSetNumber:   1,
 		Status:             storage.GameStatusPlanned,
+		Phase:              storage.GamePhasePlanned,
 		CurrentAdminUserID: userID,
 	}
 	if err := r.games.CreateGame(game); err != nil {

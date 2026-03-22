@@ -27,6 +27,7 @@ type fakeOverlayRenderer struct {
 	planned      []overlay.PlannedViewModel
 	live         []overlay.LiveViewModel
 	intermission []overlay.IntermissionViewModel
+	finished     []overlay.FinishedViewModel
 }
 
 func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
@@ -50,6 +51,20 @@ func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewMode
 	return nil
 }
 
+func (f *fakeOverlayRenderer) RenderIntermissionMain(vm overlay.IntermissionViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.intermission = append(f.intermission, vm)
+	return nil
+}
+
+func (f *fakeOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.finished = append(f.finished, vm)
+	return nil
+}
+
 func (f *fakeOverlayRenderer) plannedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -66,6 +81,12 @@ func (f *fakeOverlayRenderer) intermissionCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.intermission)
+}
+
+func (f *fakeOverlayRenderer) finishedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.finished)
 }
 
 func (f *fakeOverlayRenderer) lastIntermission() overlay.IntermissionViewModel {
@@ -427,6 +448,9 @@ func TestPlanCreateGameFromGuestSelection(t *testing.T) {
 	if current.Status != storage.GameStatusPlanned {
 		t.Fatalf("expected planned status, got %q", current.Status)
 	}
+	if current.Phase != storage.GamePhasePlanned {
+		t.Fatalf("expected planned phase, got %q", current.Phase)
+	}
 	if current.HomeTeamID != home.ID || current.GuestTeamID != guest.ID {
 		t.Fatalf("unexpected teams on planned game: home=%d guest=%d", current.HomeTeamID, current.GuestTeamID)
 	}
@@ -468,6 +492,7 @@ func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
 		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
 		CurrentSetNumber: 1,
 	}
 	if err := store.games.CreateGame(existing); err != nil {

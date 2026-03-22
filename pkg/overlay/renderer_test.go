@@ -40,6 +40,7 @@ func TestRenderPlanned(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 		LogoDir:                  logoDir,
 	}
@@ -117,6 +118,7 @@ func TestRenderLive(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 		LogoDir:                  logoDir,
 	}
@@ -202,6 +204,7 @@ func TestRenderIntermission(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 		LogoDir:                  logoDir,
 	}
@@ -265,6 +268,129 @@ func TestRenderIntermission(t *testing.T) {
 	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-break")
 }
 
+func TestRenderIntermissionMain(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
+	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-break-main")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-break-main")
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
+	}
+
+	r := NewRenderer(cfg)
+
+	vm := IntermissionViewModel{
+		HomeTeamName:       "Kroefi HS 1",
+		HomeTeamShortName:  "DYN",
+		HomeTeamHometown:   "Assendelft",
+		HomeTeamLogoPath:   "home.png",
+		GuestTeamName:      "Spaarnestad HS 14",
+		GuestTeamShortName: "AUR",
+		GuestTeamHometown:  "Haarlem",
+		GuestTeamLogoPath:  "guest.png",
+		HomeSetsWon:        2,
+		GuestSetsWon:       1,
+		SetScores: []SetScoreViewModel{
+			{SetNumber: 1, HomeScore: 25, GuestScore: 19},
+		},
+	}
+
+	if err := r.RenderIntermissionMain(vm); err != nil {
+		t.Fatalf("RenderIntermissionMain returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("main intermission output file not readable: %v", err)
+	}
+	got := string(content)
+	for _, want := range []string{"Game Score", "Set 1", "25", "19"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("main intermission output does not contain %q", want)
+		}
+	}
+}
+
+func TestRenderFinished(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	logoDir := filepath.Join(tmpDir, "logos")
+	outPath := filepath.Join(outDir, "overlay.html")
+	tmplDir := templateDir(t)
+
+	writeLogoFile(t, filepath.Join(logoDir, "home.png"), "home-finished")
+	writeLogoFile(t, filepath.Join(logoDir, "guest.png"), "guest-finished")
+
+	cfg := config.OverlayConfig{
+		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
+		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
+		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
+		OutputPath:               outPath,
+		LogoDir:                  logoDir,
+	}
+
+	r := NewRenderer(cfg)
+
+	vm := FinishedViewModel{
+		HomeTeamName:       "Kroefi HS 1",
+		HomeTeamShortName:  "DYN",
+		HomeTeamHometown:   "Assendelft",
+		HomeTeamLogoPath:   "home.png",
+		GuestTeamName:      "Spaarnestad HS 14",
+		GuestTeamShortName: "AUR",
+		GuestTeamHometown:  "Haarlem",
+		GuestTeamLogoPath:  "guest.png",
+		HomeSetsWon:        3,
+		GuestSetsWon:       1,
+		SetScores: []SetScoreViewModel{
+			{SetNumber: 1, HomeScore: 25, GuestScore: 19},
+			{SetNumber: 2, HomeScore: 17, GuestScore: 25},
+			{SetNumber: 3, HomeScore: 25, GuestScore: 20},
+			{SetNumber: 4, HomeScore: 25, GuestScore: 22},
+		},
+	}
+
+	if err := r.RenderFinished(vm); err != nil {
+		t.Fatalf("RenderFinished returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("finished output file not readable: %v", err)
+	}
+
+	got := string(content)
+	for _, want := range []string{
+		"Final Score",
+		"Kroefi HS 1",
+		"Spaarnestad HS 14",
+		"3",
+		"1",
+		"Set 4",
+		"22",
+		`src="home.png"`,
+		`src="guest.png"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("finished output does not contain %q", want)
+		}
+	}
+
+	assertFileContent(t, filepath.Join(outDir, "home.png"), "home-finished")
+	assertFileContent(t, filepath.Join(outDir, "guest.png"), "guest-finished")
+}
+
 func TestRenderPlannedOmitsThirdLineWhenHometownMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	outPath := filepath.Join(tmpDir, "overlay.html")
@@ -274,6 +400,7 @@ func TestRenderPlannedOmitsThirdLineWhenHometownMissing(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 	}
 
@@ -307,6 +434,7 @@ func TestRenderIntermissionOmitsThirdLineWhenHometownMissing(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 	}
 
@@ -344,6 +472,7 @@ func TestRenderAtomicReplacement(t *testing.T) {
 		PlannedTemplatePath:      filepath.Join(tmplDir, "planned.html.tmpl"),
 		LiveTemplatePath:         filepath.Join(tmplDir, "live.html.tmpl"),
 		IntermissionTemplatePath: filepath.Join(tmplDir, "intermission.html.tmpl"),
+		FinishedTemplatePath:     filepath.Join(tmplDir, "finished.html.tmpl"),
 		OutputPath:               outPath,
 	}
 
@@ -409,6 +538,7 @@ func TestRendererUsesCachedTemplatesAfterConstruction(t *testing.T) {
 		PlannedTemplatePath:      plannedPath,
 		LiveTemplatePath:         livePath,
 		IntermissionTemplatePath: intermissionPath,
+		FinishedTemplatePath:     intermissionPath,
 		OutputPath:               outPath,
 	})
 
@@ -454,6 +584,7 @@ func TestRendererZeroRefreshIntervalKeepsInitialTemplateSnapshot(t *testing.T) {
 		PlannedTemplatePath:                 plannedPath,
 		LiveTemplatePath:                    livePath,
 		IntermissionTemplatePath:            intermissionPath,
+		FinishedTemplatePath:                intermissionPath,
 		OutputPath:                          outPath,
 		TemplateCacheRefreshIntervalSeconds: 0,
 	})
@@ -498,6 +629,7 @@ func TestRendererPositiveRefreshIntervalSwapsFullSnapshotOnlyOnSuccessfulReload(
 		PlannedTemplatePath:                 plannedPath,
 		LiveTemplatePath:                    livePath,
 		IntermissionTemplatePath:            intermissionPath,
+		FinishedTemplatePath:                intermissionPath,
 		OutputPath:                          outPath,
 		TemplateCacheRefreshIntervalSeconds: 1,
 	})

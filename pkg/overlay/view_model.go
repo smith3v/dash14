@@ -153,3 +153,30 @@ type IntermissionViewModel struct {
 	// SetScores contains all played sets, including the active unfinished set.
 	SetScores []SetScoreViewModel
 }
+
+// FinishedViewModel holds the presentation data for the finished-match screen.
+// It intentionally has its own type so the end-of-match template can evolve
+// independently from the intermission template.
+type FinishedViewModel struct {
+	HomeTeamName string
+
+	HomeTeamShortName string
+
+	HomeTeamHometown string
+
+	HomeTeamLogoPath string
+
+	GuestTeamName string
+
+	GuestTeamShortName string
+
+	GuestTeamHometown string
+
+	GuestTeamLogoPath string
+
+	HomeSetsWon int
+
+	GuestSetsWon int
+
+	SetScores []SetScoreViewModel
+}

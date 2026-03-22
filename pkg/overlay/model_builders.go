@@ -79,6 +79,30 @@ func BuildIntermissionViewModel(
 	}
 }
 
+// BuildFinishedViewModel converts game state and set history into the finished
+// overlay view model.
+func BuildFinishedViewModel(
+	home TeamIdentity,
+	guest TeamIdentity,
+	homeSetsWon int,
+	guestSetsWon int,
+	sets []SetScoreViewModel,
+) FinishedViewModel {
+	return FinishedViewModel{
+		HomeTeamName:       home.Name,
+		HomeTeamShortName:  home.ShortName,
+		HomeTeamHometown:   home.Hometown,
+		HomeTeamLogoPath:   home.LogoPath,
+		GuestTeamName:      guest.Name,
+		GuestTeamShortName: guest.ShortName,
+		GuestTeamHometown:  guest.Hometown,
+		GuestTeamLogoPath:  guest.LogoPath,
+		HomeSetsWon:        homeSetsWon,
+		GuestSetsWon:       guestSetsWon,
+		SetScores:          sets,
+	}
+}
+
 // BuildSetScoreHistory converts persisted sets into the intermission-visible
 // score history. Unstarted placeholder sets are excluded.
 func BuildSetScoreHistory(sets []storage.GameSet) []SetScoreViewModel {

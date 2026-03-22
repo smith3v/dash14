@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/importer"
@@ -128,7 +129,14 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 		return fmt.Errorf("app: validate overlay templates: %w", err)
 	}
 	renderer := deps.newRenderer(cfg.Overlay)
-	renderer.StartTemplateRefresh(ctx, logger)
+	startOverlayRefreshLoop(
+		ctx,
+		logger,
+		time.Duration(cfg.Overlay.TemplateCacheRefreshIntervalSeconds)*time.Second,
+		games,
+		teams,
+		renderer,
+	)
 	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
 		return fmt.Errorf("app: render current overlay: %w", err)
 	}
@@ -141,6 +149,41 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 	return nil
 }
 
+func startOverlayRefreshLoop(
+	ctx context.Context,
+	logger *slog.Logger,
+	interval time.Duration,
+	games *storage.GameRepository,
+	teams *storage.TeamRepository,
+	renderer *overlay.Renderer,
+) {
+	if interval <= 0 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := renderer.RefreshTemplates(); err != nil {
+					if logger != nil {
+						logger.Error("overlay template refresh failed", "err", err)
+					}
+					continue
+				}
+				if err := renderCurrentOverlay(games, teams, renderer); err != nil && logger != nil {
+					logger.Error("overlay rerender failed after template refresh", "err", err)
+				}
+			}
+		}
+	}()
+}
+
 func validateOverlayTemplates(cfg config.OverlayConfig) error {
 	if _, err := os.Stat(cfg.PlannedTemplatePath); err != nil {
 		return err
@@ -149,6 +192,9 @@ func validateOverlayTemplates(cfg config.OverlayConfig) error {
 		return err
 	}
 	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
+		return err
+	}
+	if _, err := os.Stat(cfg.FinishedTemplatePath); err != nil {
 		return err
 	}
 	return nil
@@ -189,7 +235,19 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 	}
 	setScores := overlay.BuildSetScoreHistory(sets)
 
-	if current.Status == storage.GameStatusPlanned {
+	set, err := games.GetActiveSet(current.ID)
+	hasActiveSet := true
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hasActiveSet = false
+		set = &storage.GameSet{SetNumber: current.CurrentSetNumber}
+	}
+
+	phase := current.EffectivePhase(hasActiveSet)
+	switch phase {
+	case storage.GamePhasePlanned:
 		if err := renderer.RenderPlanned(overlay.PlannedViewModel{
 			HomeTeamName:       home.Name,
 			HomeTeamShortName:  home.ShortName,
@@ -202,37 +260,45 @@ func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepo
 		}); err != nil {
 			return err
 		}
-		return renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
+	case storage.GamePhaseSetInProgress:
+		homeScore := set.HomeScore
+		guestScore := set.GuestScore
+		if err := renderer.RenderLive(overlay.BuildLiveViewModel(
+			homeTeam,
+			guestTeam,
+			current.HomeTeamSide,
+			homeScore,
+			guestScore,
+			current.HomeSetsWon,
+			current.GuestSetsWon,
+			current.CurrentSetNumber,
+		)); err != nil {
+			return err
+		}
+	case storage.GamePhaseBetweenSets:
+		if err := renderer.RenderIntermissionMain(overlay.BuildIntermissionViewModel(
 			homeTeam,
 			guestTeam,
 			current.HomeSetsWon,
 			current.GuestSetsWon,
 			setScores,
-		))
-	}
-
-	set, err := games.GetActiveSet(current.ID)
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		)); err != nil {
 			return err
 		}
-		set = &storage.GameSet{SetNumber: current.CurrentSetNumber}
+	case storage.GamePhaseFinished:
+		if err := renderer.RenderFinished(overlay.BuildFinishedViewModel(
+			homeTeam,
+			guestTeam,
+			current.HomeSetsWon,
+			current.GuestSetsWon,
+			setScores,
+		)); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("app: unsupported game phase %q", phase)
 	}
 
-	homeScore := set.HomeScore
-	guestScore := set.GuestScore
-	if err := renderer.RenderLive(overlay.BuildLiveViewModel(
-		homeTeam,
-		guestTeam,
-		current.HomeTeamSide,
-		homeScore,
-		guestScore,
-		current.HomeSetsWon,
-		current.GuestSetsWon,
-		current.CurrentSetNumber,
-	)); err != nil {
-		return err
-	}
 	return renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
 		homeTeam,
 		guestTeam,

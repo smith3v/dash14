@@ -40,6 +40,7 @@ type rendererTemplates struct {
 	planned      *template.Template
 	live         *template.Template
 	intermission *template.Template
+	finished     *template.Template
 }
 
 func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
@@ -71,11 +72,16 @@ func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) 
 	if err != nil {
 		return rendererTemplates{}, err
 	}
+	finished, err := parse(cfg.FinishedTemplatePath, "finished")
+	if err != nil {
+		return rendererTemplates{}, err
+	}
 
 	return rendererTemplates{
 		planned:      planned,
 		live:         live,
 		intermission: intermission,
+		finished:     finished,
 	}, nil
 }
 
@@ -100,18 +106,27 @@ func (r *Renderer) refreshLoop(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			templates, err := loadRendererTemplates(r.cfg)
-			if err != nil {
+			if err := r.RefreshTemplates(); err != nil {
 				if logger != nil {
 					logger.Error("overlay template refresh failed", "err", err)
 				}
 				continue
 			}
-			r.mu.Lock()
-			r.templates = templates
-			r.mu.Unlock()
 		}
 	}
+}
+
+// RefreshTemplates reloads the renderer template snapshot from disk and swaps
+// it in atomically only after all template files parse successfully.
+func (r *Renderer) RefreshTemplates() error {
+	templates, err := loadRendererTemplates(r.cfg)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.templates = templates
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *Renderer) templateSnapshot() rendererTemplates {
@@ -144,6 +159,25 @@ func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
 		return err
 	}
 	return r.renderToPath(r.templateSnapshot().intermission, vm, r.intermissionOutputPath())
+}
+
+// RenderIntermissionMain renders the cached intermission template to the main
+// overlay output path. This is used when the between-set screen should replace
+// the normal live overlay without changing OBS scenes.
+func (r *Renderer) RenderIntermissionMain(vm IntermissionViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+	return r.renderToPath(r.templateSnapshot().intermission, vm, r.cfg.OutputPath)
+}
+
+// RenderFinished renders the cached finished template to the configured main
+// overlay output path.
+func (r *Renderer) RenderFinished(vm FinishedViewModel) error {
+	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
+		return err
+	}
+	return r.renderToPath(r.templateSnapshot().finished, vm, r.cfg.OutputPath)
 }
 
 // renderToPath executes tmpl with data and writes the result atomically to

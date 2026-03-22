@@ -21,6 +21,9 @@ func NewGameRepository(db *gorm.DB) *GameRepository {
 
 // CreateGame inserts a new Game record and populates its ID on success.
 func (r *GameRepository) CreateGame(game *Game) error {
+	if game.Phase == "" {
+		game.Phase = DeriveGamePhase(game.Status, false)
+	}
 	if err := r.db.Create(game).Error; err != nil {
 		return fmt.Errorf("storage: create game: %w", err)
 	}
@@ -115,6 +118,13 @@ func (r *GameRepository) ListSetsByGameID(gameID uint) ([]GameSet, error) {
 // SaveGame persists all fields of the given game record. The game must already
 // exist (have a non-zero ID).
 func (r *GameRepository) SaveGame(game *Game) error {
+	if game.Phase == "" {
+		hasActiveSet, err := r.hasActiveSet(game.ID)
+		if err != nil {
+			return err
+		}
+		game.Phase = DeriveGamePhase(game.Status, hasActiveSet)
+	}
 	if err := r.db.Save(game).Error; err != nil {
 		return fmt.Errorf("storage: save game %d: %w", game.ID, err)
 	}
@@ -158,4 +168,18 @@ func (r *GameRepository) ClearCurrentGameID() error {
 		return fmt.Errorf("storage: clear current game id: %w", result.Error)
 	}
 	return nil
+}
+
+func (r *GameRepository) hasActiveSet(gameID uint) (bool, error) {
+	if gameID == 0 {
+		return false, nil
+	}
+
+	var count int64
+	if err := r.db.Model(&GameSet{}).
+		Where("game_id = ? AND is_finished = ?", gameID, false).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("storage: count active sets for game %d: %w", gameID, err)
+	}
+	return count > 0, nil
 }

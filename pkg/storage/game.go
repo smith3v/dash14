@@ -14,6 +14,39 @@ const (
 	GameStatusFinished GameStatus = "finished"
 )
 
+// GamePhase represents the operator-visible phase of a match.
+type GamePhase string
+
+const (
+	// GamePhasePlanned indicates the game has been created but the first set
+	// has not started yet.
+	GamePhasePlanned GamePhase = "planned"
+	// GamePhaseSetInProgress indicates an active unfinished set exists and score
+	// controls should be available.
+	GamePhaseSetInProgress GamePhase = "set_in_progress"
+	// GamePhaseBetweenSets indicates the game is waiting between sets and no
+	// active unfinished set exists.
+	GamePhaseBetweenSets GamePhase = "between_sets"
+	// GamePhaseFinished indicates the game has concluded.
+	GamePhaseFinished GamePhase = "finished"
+)
+
+// DeriveGamePhase maps the coarse persisted game status plus active-set
+// presence into the operator-visible game phase used by the new overlay flow.
+func DeriveGamePhase(status GameStatus, hasActiveSet bool) GamePhase {
+	switch status {
+	case GameStatusPlanned:
+		return GamePhasePlanned
+	case GameStatusFinished:
+		return GamePhaseFinished
+	default:
+		if hasActiveSet {
+			return GamePhaseSetInProgress
+		}
+		return GamePhaseBetweenSets
+	}
+}
+
 // Game represents a volleyball match between two teams. It records aggregate
 // match state: which teams are playing, how many sets each has won, which set
 // is current, and administrative metadata for the Telegram control panel.
@@ -39,6 +72,10 @@ type Game struct {
 	// Status is the lifecycle state of the game.
 	Status GameStatus `gorm:"not null;default:'planned'"`
 
+	// Phase is the operator-visible state of the game. It is persisted on the
+	// existing games row, not in a separate history table.
+	Phase GamePhase `gorm:"not null;default:'planned'"`
+
 	// CurrentAdminUserID is the Telegram user ID of the admin currently
 	// managing this game. Zero means no admin is assigned.
 	CurrentAdminUserID int64 `gorm:"not null;default:0"`
@@ -53,6 +90,16 @@ type Game struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// EffectivePhase returns the persisted phase when present. For older rows where
+// phase is blank, it falls back to a conservative derivation from the coarse
+// status plus active-set presence.
+func (g Game) EffectivePhase(hasActiveSet bool) GamePhase {
+	if g.Phase != "" {
+		return g.Phase
+	}
+	return DeriveGamePhase(g.Status, hasActiveSet)
 }
 
 // GameSet records the score state of a single set within a match.
