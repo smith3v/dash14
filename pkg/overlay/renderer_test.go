@@ -389,6 +389,51 @@ func TestRenderAtomicReplacement(t *testing.T) {
 	}
 }
 
+func TestRendererUsesCachedTemplatesAfterConstruction(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-v1 {{.HomeTeamName}} vs {{.GuestTeamName}}")
+	writeTemplateFile(t, livePath, "live {{.LeftTeamName}} {{.RightTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission {{.HomeTeamName}} {{.GuestTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:      plannedPath,
+		LiveTemplatePath:         livePath,
+		IntermissionTemplatePath: intermissionPath,
+		OutputPath:               outPath,
+	})
+
+	// Mutate the source template after construction. A renderer with an
+	// in-memory cache should continue using the template snapshot it parsed when
+	// it was created.
+	writeTemplateFile(t, plannedPath, "planned-v2 {{.HomeTeamName}} changed")
+
+	if err := r.RenderPlanned(PlannedViewModel{
+		HomeTeamName:  "Home",
+		GuestTeamName: "Guest",
+	}); err != nil {
+		t.Fatalf("RenderPlanned returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable: %v", err)
+	}
+
+	got := string(content)
+	if !strings.Contains(got, "planned-v1 Home vs Guest") {
+		t.Fatalf("cached render output = %q, want content from the original parsed template", got)
+	}
+	if strings.Contains(got, "planned-v2") {
+		t.Fatalf("cached render output unexpectedly used modified on-disk template: %q", got)
+	}
+}
+
 func writeLogoFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -396,6 +441,16 @@ func writeLogoFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write logo %q: %v", path, err)
+	}
+}
+
+func writeTemplateFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write template %q: %v", path, err)
 	}
 }
 

@@ -16,57 +16,70 @@ import (
 // same directory as the output file, then renamed into place. This prevents
 // OBS from reading a partially written file.
 type Renderer struct {
-	cfg config.OverlayConfig
+	cfg       config.OverlayConfig
+	templates rendererTemplates
 }
 
 // NewRenderer creates a Renderer configured with the provided overlay config.
 func NewRenderer(cfg config.OverlayConfig) *Renderer {
-	return &Renderer{cfg: cfg}
+	return &Renderer{
+		cfg:       cfg,
+		templates: mustLoadRendererTemplates(cfg),
+	}
 }
 
-// RenderPlanned parses the planned template and renders it with vm to the
-// configured output path.
+type rendererTemplates struct {
+	planned      *template.Template
+	live         *template.Template
+	intermission *template.Template
+}
+
+func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
+	load := func(path string, label string) *template.Template {
+		tmpl, err := template.ParseFiles(path)
+		if err != nil {
+			panic(fmt.Sprintf("overlay: parse %s template %q: %v", label, path, err))
+		}
+		return tmpl
+	}
+
+	templates := rendererTemplates{
+		planned: load(cfg.PlannedTemplatePath, "planned"),
+		live:    load(cfg.LiveTemplatePath, "live"),
+	}
+	if cfg.IntermissionTemplatePath != "" {
+		templates.intermission = load(cfg.IntermissionTemplatePath, "intermission")
+	}
+	return templates
+}
+
+// RenderPlanned renders the cached planned template to the configured output
+// path.
 func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.PlannedTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse planned template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
+	return r.renderToPath(r.templates.planned, vm, r.cfg.OutputPath)
 }
 
-// RenderLive parses the live template and renders it with vm to the configured
-// output path.
+// RenderLive renders the cached live template to the configured output path.
 func (r *Renderer) RenderLive(vm LiveViewModel) error {
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.LiveTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse live template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
+	return r.renderToPath(r.templates.live, vm, r.cfg.OutputPath)
 }
 
-// RenderIntermission parses the intermission template and renders it to the
-// derived intermission output path.
+// RenderIntermission renders the cached intermission template to the derived
+// intermission output path.
 func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
-	if r.cfg.IntermissionTemplatePath == "" {
+	if r.templates.intermission == nil {
 		return nil
 	}
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.IntermissionTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse intermission template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.intermissionOutputPath())
+	return r.renderToPath(r.templates.intermission, vm, r.intermissionOutputPath())
 }
 
 // renderToPath executes tmpl with data and writes the result atomically to
