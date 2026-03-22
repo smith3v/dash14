@@ -49,6 +49,40 @@ func TestOpen(t *testing.T) {
 			t.Fatalf("foreign_keys pragma: got %d, want 1", fkOn)
 		}
 	})
+
+	t.Run("sqlite_runtime_pragmas_applied", func(t *testing.T) {
+		dir := t.TempDir()
+		dbPath := filepath.Join(dir, "dash14_pragmas.db")
+
+		db, err := storage.Open(dbPath)
+		if err != nil {
+			t.Fatalf("Open(%q): unexpected error: %v", dbPath, err)
+		}
+
+		var journalMode string
+		if err := db.Raw("PRAGMA journal_mode").Scan(&journalMode).Error; err != nil {
+			t.Fatalf("PRAGMA journal_mode query failed: %v", err)
+		}
+		if journalMode != "wal" {
+			t.Fatalf("journal_mode pragma: got %q, want %q", journalMode, "wal")
+		}
+
+		var synchronous int
+		if err := db.Raw("PRAGMA synchronous").Scan(&synchronous).Error; err != nil {
+			t.Fatalf("PRAGMA synchronous query failed: %v", err)
+		}
+		if synchronous != 1 {
+			t.Fatalf("synchronous pragma: got %d, want %d", synchronous, 1)
+		}
+
+		var busyTimeout int
+		if err := db.Raw("PRAGMA busy_timeout").Scan(&busyTimeout).Error; err != nil {
+			t.Fatalf("PRAGMA busy_timeout query failed: %v", err)
+		}
+		if busyTimeout != 5000 {
+			t.Fatalf("busy_timeout pragma: got %d, want %d", busyTimeout, 5000)
+		}
+	})
 }
 
 // TestMigrate verifies that Migrate returns nil on a fresh database.
