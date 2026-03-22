@@ -349,15 +349,19 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 		guestName,
 	)
 
-	rows := [][]models.InlineKeyboardButton{
-		{
-			{Text: fmt.Sprintf("%s -1", homeName), CallbackData: "game:home:-1"},
-			{Text: fmt.Sprintf("%s +1", homeName), CallbackData: "game:home:+1"},
-		},
-		{
-			{Text: fmt.Sprintf("%s -1", guestName), CallbackData: "game:guest:-1"},
-			{Text: fmt.Sprintf("%s +1", guestName), CallbackData: "game:guest:+1"},
-		},
+	rows := make([][]models.InlineKeyboardButton, 0, 5)
+	canAdjustScore := game.Status == storage.GameStatusInProgress && activeSet != nil
+	if canAdjustScore {
+		rows = append(rows,
+			[]models.InlineKeyboardButton{
+				{Text: fmt.Sprintf("%s -1", homeName), CallbackData: "game:home:-1"},
+				{Text: fmt.Sprintf("%s +1", homeName), CallbackData: "game:home:+1"},
+			},
+			[]models.InlineKeyboardButton{
+				{Text: fmt.Sprintf("%s -1", guestName), CallbackData: "game:guest:-1"},
+				{Text: fmt.Sprintf("%s +1", guestName), CallbackData: "game:guest:+1"},
+			},
+		)
 	}
 	if game.Status == storage.GameStatusPlanned {
 		rows = append(rows, []models.InlineKeyboardButton{

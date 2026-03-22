@@ -81,6 +81,28 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	if last.ReplyMarkup == nil {
 		t.Fatal("expected inline keyboard on control message")
 	}
+	kb, ok := last.ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok {
+		t.Fatalf("expected inline keyboard markup, got %T", last.ReplyMarkup)
+	}
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			if strings.Contains(btn.CallbackData, "game:home:") || strings.Contains(btn.CallbackData, "game:guest:") {
+				t.Fatalf("planned game control unexpectedly exposed score button %q", btn.CallbackData)
+			}
+		}
+	}
+	foundStart := false
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			if btn.CallbackData == "game:start" {
+				foundStart = true
+			}
+		}
+	}
+	if !foundStart {
+		t.Fatal("expected planned game control to include start button")
+	}
 
 	got, err := store.games.GetGameByID(game.ID)
 	if err != nil {
