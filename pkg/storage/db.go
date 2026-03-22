@@ -5,11 +5,14 @@ package storage
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // Open opens (or creates) the SQLite database at path, enables the
@@ -21,7 +24,17 @@ func Open(path string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("storage: create database directory %q: %w", dir, err)
 	}
 
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
+		Logger: gormlogger.New(
+			log.New(os.Stderr, "", log.LstdFlags),
+			gormlogger.Config{
+				SlowThreshold:             200 * time.Millisecond,
+				LogLevel:                  gormlogger.Warn,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  false,
+			},
+		),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: open database %q: %w", path, err)
 	}
