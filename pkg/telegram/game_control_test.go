@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
@@ -246,13 +249,15 @@ func TestGameControlSet3FinishCreatesSet4(t *testing.T) {
 	if nextSet.SetNumber != 4 {
 		t.Fatalf("expected next active set number 4, got %d", nextSet.SetNumber)
 	}
-	if len(renderer.live) == 0 {
+	waitForCondition(t, "live overlay render after set finish", func() bool { return renderer.liveCount() > 0 })
+	if renderer.liveCount() == 0 {
 		t.Fatal("expected live overlay rendering after set finish")
 	}
-	if len(renderer.intermission) == 0 {
+	waitForCondition(t, "intermission overlay render after set finish", func() bool { return renderer.intermissionCount() > 0 })
+	if renderer.intermissionCount() == 0 {
 		t.Fatal("expected intermission overlay rendering after set finish")
 	}
-	last := renderer.intermission[len(renderer.intermission)-1]
+	last := renderer.lastIntermission()
 	if len(last.SetScores) != 1 {
 		t.Fatalf("expected only finished sets in intermission, got %d entries", len(last.SetScores))
 	}
@@ -316,7 +321,8 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set 4 finish prompt, got err=%v", err)
 	}
-	if len(renderer.live) == 0 {
+	waitForCondition(t, "live overlay render after set 4 finish", func() bool { return renderer.liveCount() > 0 })
+	if renderer.liveCount() == 0 {
 		t.Fatal("expected live overlay rendering after set finish")
 	}
 }
@@ -424,5 +430,182 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	if len(kb.InlineKeyboard) != 0 {
 		t.Fatalf("expected no controls after finish, got %d keyboard rows", len(kb.InlineKeyboard))
+	}
+}
+
+type blockingOverlayRenderer struct {
+	started      chan struct{}
+	release      chan struct{}
+	mu           sync.Mutex
+	plannedCount int
+	liveCountV   int
+	breakCount   int
+}
+
+func (b *blockingOverlayRenderer) signalStarted() {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+}
+
+func (b *blockingOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
+	b.signalStarted()
+	<-b.release
+	b.mu.Lock()
+	b.plannedCount++
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
+	b.signalStarted()
+	<-b.release
+	b.mu.Lock()
+	b.liveCountV++
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewModel) error {
+	b.signalStarted()
+	<-b.release
+	b.mu.Lock()
+	b.breakCount++
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingOverlayRenderer) totalCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.plannedCount + b.liveCountV + b.breakCount
+}
+
+type saveFailGames struct {
+	inner        *storage.GameRepository
+	failSaveGame bool
+	failSaveSet  bool
+}
+
+func (g *saveFailGames) CreateGame(game *storage.Game) error                  { return g.inner.CreateGame(game) }
+func (g *saveFailGames) CreateSet(set *storage.GameSet) error                  { return g.inner.CreateSet(set) }
+func (g *saveFailGames) GetCurrentGame() (*storage.Game, error)                { return g.inner.GetCurrentGame() }
+func (g *saveFailGames) GetNonFinishedGame() (*storage.Game, error)            { return g.inner.GetNonFinishedGame() }
+func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error)            { return g.inner.GetGameByID(id) }
+func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error)    { return g.inner.GetActiveSet(gameID) }
+func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) { return g.inner.ListSetsByGameID(gameID) }
+func (g *saveFailGames) SetCurrentGameID(id uint) error                        { return g.inner.SetCurrentGameID(id) }
+func (g *saveFailGames) ClearCurrentGameID() error                             { return g.inner.ClearCurrentGameID() }
+
+func (g *saveFailGames) SaveGame(game *storage.Game) error {
+	if g.failSaveGame {
+		return errors.New("simulated save game failure")
+	}
+	return g.inner.SaveGame(game)
+}
+
+func (g *saveFailGames) SaveSet(set *storage.GameSet) error {
+	if g.failSaveSet {
+		return errors.New("simulated save set failure")
+	}
+	return g.inner.SaveSet(set)
+}
+
+func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
+	store := openPlanTestStore(t)
+	fb := &FakeBot{}
+	renderer := &blockingOverlayRenderer{
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	b := newTestBot(t)
+	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
+	r.overlayQueueSize = 1
+	r.broadcastQueueSize = 1
+	r.SetGameServices(store.games, renderer)
+	ctx := context.Background()
+
+	const adminID int64 = 7310
+	const subID int64 = 7311
+	const chatID int64 = 8310
+	store.createAdminUser(t, adminID, "owner-order")
+	if err := store.users.UpsertTelegramUser(subID, "subscriber", "Subscriber"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, adminID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	ctrlID := current.ControlMessageID
+
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-order", "game:start"))
+
+	select {
+	case <-renderer.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async overlay worker to start")
+	}
+
+	if len(fb.EditedMessages()) == 0 {
+		t.Fatal("expected control message to be edited before async overlay finishes")
+	}
+	if renderer.totalCalls() != 0 {
+		t.Fatal("expected overlay render to remain blocked while control edit is already visible")
+	}
+	if len(fb.SentMessages()) != 1 {
+		t.Fatalf("expected only initial control message before async side effects complete, got %d", len(fb.SentMessages()))
+	}
+
+	close(renderer.release)
+	waitForCondition(t, "overlay render completion", func() bool { return renderer.totalCalls() > 0 })
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+}
+
+func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
+	store := openPlanTestStore(t)
+	fb := &FakeBot{}
+	renderer := &fakeOverlayRenderer{}
+	b := newTestBot(t)
+	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
+	r.SetGameServices(store.games, renderer)
+	ctx := context.Background()
+
+	const adminID int64 = 7312
+	const subID int64 = 7313
+	const chatID int64 = 8312
+	store.createAdminUser(t, adminID, "owner-fail")
+	if err := store.users.UpsertTelegramUser(subID, "subscriber", "Subscriber"); err != nil {
+		t.Fatalf("UpsertTelegramUser: %v", err)
+	}
+	game := createCurrentPlannedGame(t, store, adminID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	ctrlID := current.ControlMessageID
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-save", "game:start"))
+	waitForCondition(t, "initial overlay renders after start", func() bool {
+		return renderer.liveCount() == 1 && renderer.intermissionCount() == 1
+	})
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+
+	r.games = &saveFailGames{inner: store.games, failSaveSet: true}
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-save-fail", "game:home:+1"))
+
+	if len(fb.EditedMessages()) != 1 {
+		t.Fatalf("expected no extra edited control message after save failure, got %d edits", len(fb.EditedMessages()))
+	}
+	time.Sleep(100 * time.Millisecond)
+	if renderer.liveCount() != 1 || renderer.intermissionCount() != 1 {
+		t.Fatalf("expected no extra overlay renders after save failure, got live=%d intermission=%d", renderer.liveCount(), renderer.intermissionCount())
+	}
+	if len(fb.SentMessages()) != 2 {
+		t.Fatalf("expected no extra broadcast after save failure, got %d sent messages", len(fb.SentMessages()))
 	}
 }

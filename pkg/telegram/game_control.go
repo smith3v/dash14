@@ -131,6 +131,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	}
 
 	broadcastText := ""
+	var overlayJob *overlayJob
 
 	switch data {
 	case "game:start":
@@ -272,18 +273,30 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	default:
 		return
 	}
-
-	if err := r.renderOverlay(game, home, guest, activeSet); err != nil {
-		r.logger.ErrorContext(ctx, "handleGameCallback: render overlay failed", "game_id", game.ID, "err", err)
+	if r.renderer != nil {
+		job, err := r.buildOverlayJob(game, home, guest, activeSet)
+		if err != nil {
+			r.logger.ErrorContext(ctx, "handleGameCallback: build overlay job failed", "game_id", game.ID, "err", err)
+		} else {
+			overlayJob = job
+		}
 	}
 
 	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
-	_, _ = r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
+	_, editErr := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      chatID,
 		MessageID:   game.ControlMessageID,
 		Text:        view.Text,
 		ReplyMarkup: view.Keyboard,
 	})
+	if editErr != nil {
+		r.logger.ErrorContext(ctx, "handleGameCallback: edit control message failed",
+			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
+	}
+
+	if overlayJob != nil {
+		r.enqueueOverlayRender(ctx, *overlayJob)
+	}
 
 	if strings.TrimSpace(broadcastText) != "" {
 		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
@@ -424,73 +437,126 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func (r *Router) renderOverlay(game *storage.Game, home, guest *storage.Team, activeSet *storage.GameSet) error {
+type overlayJob struct {
+	game         storage.Game
+	home         storage.Team
+	guest        storage.Team
+	activeSet    *storage.GameSet
+	sets         []storage.GameSet
+}
+
+func (r *Router) buildOverlayJob(game *storage.Game, home, guest *storage.Team, activeSet *storage.GameSet) (*overlayJob, error) {
+	sets, err := r.games.ListSetsByGameID(game.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	job := &overlayJob{
+		game:  *game,
+		home:  *home,
+		guest: *guest,
+		sets:  append([]storage.GameSet(nil), sets...),
+	}
+	if activeSet != nil {
+		setCopy := *activeSet
+		job.activeSet = &setCopy
+	}
+	return job, nil
+}
+
+func (r *Router) ensureOverlayWorker() {
+	r.overlayWorkerOnce.Do(func() {
+		if r.overlayQueueSize <= 0 {
+			r.overlayQueueSize = defaultOverlayQueueSize
+		}
+		r.overlayJobs = make(chan overlayJob, r.overlayQueueSize)
+		go r.overlayLoop()
+	})
+}
+
+func (r *Router) overlayLoop() {
+	for job := range r.overlayJobs {
+		if err := r.renderOverlayJob(job); err != nil {
+			r.logger.Error("overlay render failed", "game_id", job.game.ID, "err", err)
+		}
+	}
+}
+
+func (r *Router) enqueueOverlayRender(ctx context.Context, job overlayJob) {
+	if r.renderer == nil {
+		return
+	}
+	r.ensureOverlayWorker()
+	select {
+	case r.overlayJobs <- job:
+	default:
+		r.logger.WarnContext(ctx, "Overlay: queue full, dropping render job", "game_id", job.game.ID)
+	}
+}
+
+func (r *Router) renderOverlayJob(job overlayJob) error {
 	if r.renderer == nil {
 		return nil
 	}
-	sets, err := r.games.ListSetsByGameID(game.ID)
-	if err != nil {
-		return err
-	}
 	homeTeam := overlay.TeamIdentity{
-		Name:      home.Name,
-		ShortName: home.ShortName,
-		Hometown:  home.Hometown,
-		LogoPath:  home.LogoPath,
+		Name:      job.home.Name,
+		ShortName: job.home.ShortName,
+		Hometown:  job.home.Hometown,
+		LogoPath:  job.home.LogoPath,
 	}
 	guestTeam := overlay.TeamIdentity{
-		Name:      guest.Name,
-		ShortName: guest.ShortName,
-		Hometown:  guest.Hometown,
-		LogoPath:  guest.LogoPath,
+		Name:      job.guest.Name,
+		ShortName: job.guest.ShortName,
+		Hometown:  job.guest.Hometown,
+		LogoPath:  job.guest.LogoPath,
 	}
-	setScores := overlay.BuildSetScoreHistory(sets)
+	setScores := overlay.BuildSetScoreHistory(job.sets)
 
-	if game.Status == storage.GameStatusPlanned {
+	if job.game.Status == storage.GameStatusPlanned {
 		if err := r.renderer.RenderPlanned(overlay.PlannedViewModel{
-			HomeTeamName:       home.Name,
-			HomeTeamShortName:  home.ShortName,
-			HomeTeamHometown:   home.Hometown,
-			HomeTeamLogoPath:   home.LogoPath,
-			GuestTeamName:      guest.Name,
-			GuestTeamShortName: guest.ShortName,
-			GuestTeamHometown:  guest.Hometown,
-			GuestTeamLogoPath:  guest.LogoPath,
+			HomeTeamName:       job.home.Name,
+			HomeTeamShortName:  job.home.ShortName,
+			HomeTeamHometown:   job.home.Hometown,
+			HomeTeamLogoPath:   job.home.LogoPath,
+			GuestTeamName:      job.guest.Name,
+			GuestTeamShortName: job.guest.ShortName,
+			GuestTeamHometown:  job.guest.Hometown,
+			GuestTeamLogoPath:  job.guest.LogoPath,
 		}); err != nil {
 			return err
 		}
 		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
 			homeTeam,
 			guestTeam,
-			game.HomeSetsWon,
-			game.GuestSetsWon,
+			job.game.HomeSetsWon,
+			job.game.GuestSetsWon,
 			setScores,
 		))
 	}
 
 	homeScore := 0
 	guestScore := 0
-	if activeSet != nil {
-		homeScore = activeSet.HomeScore
-		guestScore = activeSet.GuestScore
+	if job.activeSet != nil {
+		homeScore = job.activeSet.HomeScore
+		guestScore = job.activeSet.GuestScore
 	}
 	if err := r.renderer.RenderLive(overlay.BuildLiveViewModel(
 		homeTeam,
 		guestTeam,
-		game.HomeTeamSide,
+		job.game.HomeTeamSide,
 		homeScore,
 		guestScore,
-		game.HomeSetsWon,
-		game.GuestSetsWon,
-		game.CurrentSetNumber,
+		job.game.HomeSetsWon,
+		job.game.GuestSetsWon,
+		job.game.CurrentSetNumber,
 	)); err != nil {
 		return err
 	}
 	return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
 		homeTeam,
 		guestTeam,
-		game.HomeSetsWon,
-		game.GuestSetsWon,
+		job.game.HomeSetsWon,
+		job.game.GuestSetsWon,
 		setScores,
 	))
 }
