@@ -76,6 +76,7 @@ overlay:
   planned_template_path: "templates/planned.html.tmpl"
   live_template_path: "templates/live.html.tmpl"
   intermission_template_path: "templates/intermission.html.tmpl"
+  template_cache_refresh_interval_seconds: 0
   output_path: "runtime/out/overlay.html"
   logo_dir: "runtime/data/logos"
 
@@ -158,6 +159,7 @@ What it does:
 - opens SQLite and runs migrations
 - validates template paths
 - renders current overlay pages (if a current game exists)
+- starts optional template refresh polling when `overlay.template_cache_refresh_interval_seconds > 0`
 - starts Telegram update polling and blocks
 
 ## Telegram Workflow
@@ -238,6 +240,9 @@ gofmt -w ./...
 - Template validation fails at startup:
   - verify `overlay.planned_template_path`, `overlay.live_template_path`, and `overlay.intermission_template_path`
   - ensure files exist and are readable.
+- Template edits are not picked up:
+  - by default templates are cached in memory for the lifetime of the process
+  - set `overlay.template_cache_refresh_interval_seconds` to a positive number to enable periodic reloads
 - Bot does not respond:
   - verify `telegram.token`
   - check network connectivity and logs.

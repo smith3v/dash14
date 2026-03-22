@@ -44,6 +44,18 @@ func (c Config) ValidateRuntime() error {
 	if c.SQLite.Path == "" {
 		errs = append(errs, errors.New("sqlite.path is required"))
 	}
+	if c.Overlay.PlannedTemplatePath == "" {
+		errs = append(errs, errors.New("overlay.planned_template_path is required"))
+	}
+	if c.Overlay.LiveTemplatePath == "" {
+		errs = append(errs, errors.New("overlay.live_template_path is required"))
+	}
+	if c.Overlay.IntermissionTemplatePath == "" {
+		errs = append(errs, errors.New("overlay.intermission_template_path is required"))
+	}
+	if c.Overlay.TemplateCacheRefreshIntervalSeconds < 0 {
+		errs = append(errs, errors.New("overlay.template_cache_refresh_interval_seconds must be >= 0"))
+	}
 
 	return errors.Join(errs...)
 }
@@ -56,6 +68,9 @@ func (c Config) ValidateImport() error {
 
 	if c.SQLite.Path == "" {
 		errs = append(errs, errors.New("sqlite.path is required"))
+	}
+	if c.Overlay.TemplateCacheRefreshIntervalSeconds < 0 {
+		errs = append(errs, errors.New("overlay.template_cache_refresh_interval_seconds must be >= 0"))
 	}
 
 	return errors.Join(errs...)

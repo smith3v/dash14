@@ -43,6 +43,11 @@ type OverlayConfig struct {
 
 	// LogoDir is the managed directory where team logo files are stored.
 	LogoDir string `yaml:"logo_dir"`
+
+	// TemplateCacheRefreshIntervalSeconds controls how often parsed overlay
+	// templates are refreshed from disk. Zero means load once and keep the
+	// in-memory cache indefinitely.
+	TemplateCacheRefreshIntervalSeconds int `yaml:"template_cache_refresh_interval_seconds"`
 }
 
 // LoggingConfig controls log output format and destination.

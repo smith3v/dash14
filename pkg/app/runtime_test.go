@@ -127,6 +127,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 			IntermissionTemplatePath: intermissionTpl,
 			OutputPath:               outputPath,
 			LogoDir:                  filepath.Join(dir, "logos"),
+			TemplateCacheRefreshIntervalSeconds: 1,
 		},
 	}
 
@@ -163,7 +164,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	}
 }
 
-func TestRunWithDepsRuntimeAllowsMissingIntermissionTemplate(t *testing.T) {
+func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "dash14.db")
 	outputPath := filepath.Join(dir, "overlay", "current.html")
@@ -229,17 +230,14 @@ func TestRunWithDepsRuntimeAllowsMissingIntermissionTemplate(t *testing.T) {
 	}
 
 	err = runWithDeps(context.Background(), Options{ConfigPath: "unused.yaml"}, deps)
-	if err != nil {
-		t.Fatalf("runWithDeps runtime mode: %v", err)
+	if err == nil {
+		t.Fatal("runWithDeps runtime mode expected error for missing intermission template, got nil")
 	}
-	if !telegramStarted {
-		t.Fatal("expected telegram runtime to start")
+	if !strings.Contains(err.Error(), "overlay.intermission_template_path is required") {
+		t.Fatalf("runWithDeps runtime mode error = %q, want missing intermission template path", err)
 	}
-	if _, err := os.Stat(outputPath); err != nil {
-		t.Fatalf("expected main overlay output to be rendered: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(outputPath), "intermission.html")); !os.IsNotExist(err) {
-		t.Fatalf("expected no intermission output file, got err=%v", err)
+	if telegramStarted {
+		t.Fatal("telegram runtime should not start when runtime config is invalid")
 	}
 }
 

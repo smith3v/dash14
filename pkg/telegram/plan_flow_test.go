@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/smith3v/dash14/pkg/overlay"
@@ -21,24 +23,67 @@ type planTestStore struct {
 }
 
 type fakeOverlayRenderer struct {
+	mu           sync.Mutex
 	planned      []overlay.PlannedViewModel
 	live         []overlay.LiveViewModel
 	intermission []overlay.IntermissionViewModel
 }
 
 func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.planned = append(f.planned, vm)
 	return nil
 }
 
 func (f *fakeOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.live = append(f.live, vm)
 	return nil
 }
 
 func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewModel) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.intermission = append(f.intermission, vm)
 	return nil
+}
+
+func (f *fakeOverlayRenderer) plannedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.planned)
+}
+
+func (f *fakeOverlayRenderer) liveCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.live)
+}
+
+func (f *fakeOverlayRenderer) intermissionCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.intermission)
+}
+
+func (f *fakeOverlayRenderer) lastIntermission() overlay.IntermissionViewModel {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.intermission[len(f.intermission)-1]
+}
+
+func waitForCondition(t *testing.T, desc string, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", desc)
 }
 
 // openPlanTestStore creates an isolated SQLite database with all migrations

@@ -26,9 +26,31 @@ func Open(path string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("storage: open database %q: %w", path, err)
 	}
 
-	// Enable foreign-key enforcement. SQLite disables it by default.
-	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
-		return nil, fmt.Errorf("storage: enable foreign_keys pragma: %w", err)
+	pragmas := []struct {
+		sql     string
+		context string
+	}{
+		{
+			sql:     "PRAGMA foreign_keys = ON",
+			context: "enable foreign_keys pragma",
+		},
+		{
+			sql:     "PRAGMA journal_mode = WAL",
+			context: "set journal_mode pragma",
+		},
+		{
+			sql:     "PRAGMA synchronous = NORMAL",
+			context: "set synchronous pragma",
+		},
+		{
+			sql:     "PRAGMA busy_timeout = 5000",
+			context: "set busy_timeout pragma",
+		},
+	}
+	for _, pragma := range pragmas {
+		if err := db.Exec(pragma.sql).Error; err != nil {
+			return nil, fmt.Errorf("storage: %s: %w", pragma.context, err)
+		}
 	}
 
 	return db, nil

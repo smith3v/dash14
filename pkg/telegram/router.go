@@ -18,19 +18,43 @@ type OverlayRenderer interface {
 	RenderIntermission(vm overlay.IntermissionViewModel) error
 }
 
+// GameStore captures the game persistence operations used by Telegram flows.
+type GameStore interface {
+	CreateGame(game *storage.Game) error
+	CreateSet(set *storage.GameSet) error
+	GetCurrentGame() (*storage.Game, error)
+	GetNonFinishedGame() (*storage.Game, error)
+	GetGameByID(id uint) (*storage.Game, error)
+	GetActiveSet(gameID uint) (*storage.GameSet, error)
+	ListSetsByGameID(gameID uint) ([]storage.GameSet, error)
+	SaveGame(game *storage.Game) error
+	SaveSet(set *storage.GameSet) error
+	SetCurrentGameID(id uint) error
+	ClearCurrentGameID() error
+}
+
 // Router dispatches Telegram updates to the correct handler.
 // Handler dependencies (database repositories, renderer, etc.) will be added
 // as fields here in subsequent tasks.
 type Router struct {
-	b        *bot.Bot
-	logger   *slog.Logger
-	client   BotClient
-	users    *storage.UserRepository
-	teams    *storage.TeamRepository
-	games    *storage.GameRepository
-	renderer OverlayRenderer
-	plans    sync.Map // map[int64]*planState — keyed by Telegram user ID
+	b                   *bot.Bot
+	logger              *slog.Logger
+	client              BotClient
+	users               *storage.UserRepository
+	teams               *storage.TeamRepository
+	games               GameStore
+	renderer            OverlayRenderer
+	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
+	broadcastQueueSize  int
+	broadcastJobs       chan broadcastJob
+	broadcastWorkerOnce sync.Once
+	overlayQueueSize    int
+	overlayJobs         chan overlayJob
+	overlayWorkerOnce   sync.Once
 }
+
+const defaultBroadcastQueueSize = 32
+const defaultOverlayQueueSize = 32
 
 // NewRouter creates a Router that registers handlers on b.
 // client is the BotClient used to send messages (typically b itself, or a
@@ -38,17 +62,19 @@ type Router struct {
 // teams is the TeamRepository used by the /plan wizard.
 func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage.UserRepository, teams *storage.TeamRepository) *Router {
 	return &Router{
-		b:      b,
-		logger: logger,
-		client: client,
-		users:  users,
-		teams:  teams,
+		b:                  b,
+		logger:             logger,
+		client:             client,
+		users:              users,
+		teams:              teams,
+		broadcastQueueSize: defaultBroadcastQueueSize,
+		overlayQueueSize:   defaultOverlayQueueSize,
 	}
 }
 
 // SetGameServices wires game-related dependencies that are optional in early
 // tests but required by /plan completion and /game flows.
-func (r *Router) SetGameServices(games *storage.GameRepository, renderer OverlayRenderer) {
+func (r *Router) SetGameServices(games GameStore, renderer OverlayRenderer) {
 	r.games = games
 	r.renderer = renderer
 }

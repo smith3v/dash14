@@ -1,12 +1,16 @@
 package overlay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 )
@@ -16,57 +20,130 @@ import (
 // same directory as the output file, then renamed into place. This prevents
 // OBS from reading a partially written file.
 type Renderer struct {
-	cfg config.OverlayConfig
+	cfg             config.OverlayConfig
+	mu              sync.RWMutex
+	templates       rendererTemplates
+	refreshInterval time.Duration
+	refreshOnce     sync.Once
 }
 
 // NewRenderer creates a Renderer configured with the provided overlay config.
 func NewRenderer(cfg config.OverlayConfig) *Renderer {
-	return &Renderer{cfg: cfg}
+	return &Renderer{
+		cfg:             cfg,
+		templates:       mustLoadRendererTemplates(cfg),
+		refreshInterval: time.Duration(cfg.TemplateCacheRefreshIntervalSeconds) * time.Second,
+	}
 }
 
-// RenderPlanned parses the planned template and renders it with vm to the
-// configured output path.
+type rendererTemplates struct {
+	planned      *template.Template
+	live         *template.Template
+	intermission *template.Template
+}
+
+func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
+	templates, err := loadRendererTemplates(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return templates
+}
+
+func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) {
+	parse := func(path string, label string) (*template.Template, error) {
+		tmpl, err := template.ParseFiles(path)
+		if err != nil {
+			return nil, fmt.Errorf("overlay: parse %s template %q: %w", label, path, err)
+		}
+		return tmpl, nil
+	}
+
+	planned, err := parse(cfg.PlannedTemplatePath, "planned")
+	if err != nil {
+		return rendererTemplates{}, err
+	}
+	live, err := parse(cfg.LiveTemplatePath, "live")
+	if err != nil {
+		return rendererTemplates{}, err
+	}
+	intermission, err := parse(cfg.IntermissionTemplatePath, "intermission")
+	if err != nil {
+		return rendererTemplates{}, err
+	}
+
+	return rendererTemplates{
+		planned:      planned,
+		live:         live,
+		intermission: intermission,
+	}, nil
+}
+
+// StartTemplateRefresh starts the optional background template refresh loop.
+// A zero refresh interval means the in-memory template cache stays fixed for
+// the lifetime of the process after the initial load.
+func (r *Renderer) StartTemplateRefresh(ctx context.Context, logger *slog.Logger) {
+	if r.refreshInterval <= 0 {
+		return
+	}
+	r.refreshOnce.Do(func() {
+		go r.refreshLoop(ctx, logger)
+	})
+}
+
+func (r *Renderer) refreshLoop(ctx context.Context, logger *slog.Logger) {
+	ticker := time.NewTicker(r.refreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			templates, err := loadRendererTemplates(r.cfg)
+			if err != nil {
+				if logger != nil {
+					logger.Error("overlay template refresh failed", "err", err)
+				}
+				continue
+			}
+			r.mu.Lock()
+			r.templates = templates
+			r.mu.Unlock()
+		}
+	}
+}
+
+func (r *Renderer) templateSnapshot() rendererTemplates {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.templates
+}
+
+// RenderPlanned renders the cached planned template to the configured output
+// path.
 func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.PlannedTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse planned template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
+	return r.renderToPath(r.templateSnapshot().planned, vm, r.cfg.OutputPath)
 }
 
-// RenderLive parses the live template and renders it with vm to the configured
-// output path.
+// RenderLive renders the cached live template to the configured output path.
 func (r *Renderer) RenderLive(vm LiveViewModel) error {
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.LiveTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse live template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.cfg.OutputPath)
+	return r.renderToPath(r.templateSnapshot().live, vm, r.cfg.OutputPath)
 }
 
-// RenderIntermission parses the intermission template and renders it to the
-// derived intermission output path.
+// RenderIntermission renders the cached intermission template to the derived
+// intermission output path.
 func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
-	if r.cfg.IntermissionTemplatePath == "" {
-		return nil
-	}
 	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
 		return err
 	}
-
-	tmpl, err := template.ParseFiles(r.cfg.IntermissionTemplatePath)
-	if err != nil {
-		return fmt.Errorf("overlay: parse intermission template: %w", err)
-	}
-	return r.renderToPath(tmpl, vm, r.intermissionOutputPath())
+	return r.renderToPath(r.templateSnapshot().intermission, vm, r.intermissionOutputPath())
 }
 
 // renderToPath executes tmpl with data and writes the result atomically to

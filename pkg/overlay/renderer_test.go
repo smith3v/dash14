@@ -1,10 +1,14 @@
 package overlay
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 )
@@ -389,6 +393,155 @@ func TestRenderAtomicReplacement(t *testing.T) {
 	}
 }
 
+func TestRendererUsesCachedTemplatesAfterConstruction(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-v1 {{.HomeTeamName}} vs {{.GuestTeamName}}")
+	writeTemplateFile(t, livePath, "live {{.LeftTeamName}} {{.RightTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission {{.HomeTeamName}} {{.GuestTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:      plannedPath,
+		LiveTemplatePath:         livePath,
+		IntermissionTemplatePath: intermissionPath,
+		OutputPath:               outPath,
+	})
+
+	// Mutate the source template after construction. A renderer with an
+	// in-memory cache should continue using the template snapshot it parsed when
+	// it was created.
+	writeTemplateFile(t, plannedPath, "planned-v2 {{.HomeTeamName}} changed")
+
+	if err := r.RenderPlanned(PlannedViewModel{
+		HomeTeamName:  "Home",
+		GuestTeamName: "Guest",
+	}); err != nil {
+		t.Fatalf("RenderPlanned returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable: %v", err)
+	}
+
+	got := string(content)
+	if !strings.Contains(got, "planned-v1 Home vs Guest") {
+		t.Fatalf("cached render output = %q, want content from the original parsed template", got)
+	}
+	if strings.Contains(got, "planned-v2") {
+		t.Fatalf("cached render output unexpectedly used modified on-disk template: %q", got)
+	}
+}
+
+func TestRendererZeroRefreshIntervalKeepsInitialTemplateSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-zero-v1 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "live-zero-v1 {{.LeftTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission-zero-v1 {{.HomeTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:                 plannedPath,
+		LiveTemplatePath:                    livePath,
+		IntermissionTemplatePath:            intermissionPath,
+		OutputPath:                          outPath,
+		TemplateCacheRefreshIntervalSeconds: 0,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.StartTemplateRefresh(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	writeTemplateFile(t, plannedPath, "planned-zero-v2 {{.HomeTeamName}}")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "planned-zero-v1 Home") {
+		t.Fatalf("zero-interval render output = %q, want cached initial template content", got)
+	}
+	if strings.Contains(got, "planned-zero-v2") {
+		t.Fatalf("zero-interval render output unexpectedly refreshed from disk: %q", got)
+	}
+}
+
+func TestRendererPositiveRefreshIntervalSwapsFullSnapshotOnlyOnSuccessfulReload(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-refresh-v1 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "live-refresh-v1 {{.LeftTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission-refresh-v1 {{.HomeTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:                 plannedPath,
+		LiveTemplatePath:                    livePath,
+		IntermissionTemplatePath:            intermissionPath,
+		OutputPath:                          outPath,
+		TemplateCacheRefreshIntervalSeconds: 1,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.refreshInterval = 20 * time.Millisecond
+	r.StartTemplateRefresh(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	writeTemplateFile(t, plannedPath, "planned-refresh-v2 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "{{")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned after failed refresh returned error: %v", err)
+	}
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable after failed refresh: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "planned-refresh-v1 Home") {
+		t.Fatalf("failed-refresh output = %q, want original template snapshot", got)
+	}
+	if strings.Contains(got, "planned-refresh-v2") {
+		t.Fatalf("failed-refresh output unexpectedly swapped partial snapshot: %q", got)
+	}
+
+	writeTemplateFile(t, livePath, "live-refresh-v2 {{.LeftTeamName}}")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned after successful refresh returned error: %v", err)
+	}
+	content, err = os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable after successful refresh: %v", err)
+	}
+	got = string(content)
+	if !strings.Contains(got, "planned-refresh-v2 Home") {
+		t.Fatalf("successful-refresh output = %q, want updated template snapshot", got)
+	}
+}
+
 func writeLogoFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -396,6 +549,16 @@ func writeLogoFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write logo %q: %v", path, err)
+	}
+}
+
+func writeTemplateFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write template %q: %v", path, err)
 	}
 }
 
