@@ -127,6 +127,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 			IntermissionTemplatePath: intermissionTpl,
 			OutputPath:               outputPath,
 			LogoDir:                  filepath.Join(dir, "logos"),
+			TemplateCacheRefreshIntervalSeconds: 1,
 		},
 	}
 

@@ -1,10 +1,14 @@
 package overlay
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 )
@@ -431,6 +435,110 @@ func TestRendererUsesCachedTemplatesAfterConstruction(t *testing.T) {
 	}
 	if strings.Contains(got, "planned-v2") {
 		t.Fatalf("cached render output unexpectedly used modified on-disk template: %q", got)
+	}
+}
+
+func TestRendererZeroRefreshIntervalKeepsInitialTemplateSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-zero-v1 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "live-zero-v1 {{.LeftTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission-zero-v1 {{.HomeTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:                 plannedPath,
+		LiveTemplatePath:                    livePath,
+		IntermissionTemplatePath:            intermissionPath,
+		OutputPath:                          outPath,
+		TemplateCacheRefreshIntervalSeconds: 0,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.StartTemplateRefresh(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	writeTemplateFile(t, plannedPath, "planned-zero-v2 {{.HomeTeamName}}")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "planned-zero-v1 Home") {
+		t.Fatalf("zero-interval render output = %q, want cached initial template content", got)
+	}
+	if strings.Contains(got, "planned-zero-v2") {
+		t.Fatalf("zero-interval render output unexpectedly refreshed from disk: %q", got)
+	}
+}
+
+func TestRendererPositiveRefreshIntervalSwapsFullSnapshotOnlyOnSuccessfulReload(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "overlay.html")
+
+	plannedPath := filepath.Join(tmpDir, "planned.html.tmpl")
+	livePath := filepath.Join(tmpDir, "live.html.tmpl")
+	intermissionPath := filepath.Join(tmpDir, "intermission.html.tmpl")
+
+	writeTemplateFile(t, plannedPath, "planned-refresh-v1 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "live-refresh-v1 {{.LeftTeamName}}")
+	writeTemplateFile(t, intermissionPath, "intermission-refresh-v1 {{.HomeTeamName}}")
+
+	r := NewRenderer(config.OverlayConfig{
+		PlannedTemplatePath:                 plannedPath,
+		LiveTemplatePath:                    livePath,
+		IntermissionTemplatePath:            intermissionPath,
+		OutputPath:                          outPath,
+		TemplateCacheRefreshIntervalSeconds: 1,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.refreshInterval = 20 * time.Millisecond
+	r.StartTemplateRefresh(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	writeTemplateFile(t, plannedPath, "planned-refresh-v2 {{.HomeTeamName}}")
+	writeTemplateFile(t, livePath, "{{")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned after failed refresh returned error: %v", err)
+	}
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable after failed refresh: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "planned-refresh-v1 Home") {
+		t.Fatalf("failed-refresh output = %q, want original template snapshot", got)
+	}
+	if strings.Contains(got, "planned-refresh-v2") {
+		t.Fatalf("failed-refresh output unexpectedly swapped partial snapshot: %q", got)
+	}
+
+	writeTemplateFile(t, livePath, "live-refresh-v2 {{.LeftTeamName}}")
+	time.Sleep(80 * time.Millisecond)
+
+	if err := r.RenderPlanned(PlannedViewModel{HomeTeamName: "Home"}); err != nil {
+		t.Fatalf("RenderPlanned after successful refresh returned error: %v", err)
+	}
+	content, err = os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("output file not readable after successful refresh: %v", err)
+	}
+	got = string(content)
+	if !strings.Contains(got, "planned-refresh-v2 Home") {
+		t.Fatalf("successful-refresh output = %q, want updated template snapshot", got)
 	}
 }
 

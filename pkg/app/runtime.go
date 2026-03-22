@@ -128,6 +128,7 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 		return fmt.Errorf("app: validate overlay templates: %w", err)
 	}
 	renderer := deps.newRenderer(cfg.Overlay)
+	renderer.StartTemplateRefresh(ctx, logger)
 	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
 		return fmt.Errorf("app: render current overlay: %w", err)
 	}
