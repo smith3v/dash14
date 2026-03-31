@@ -1,21 +1,16 @@
-# Review Findings Fixes Design
+# Lifecycle Persistence Design
 
 ## Overview
 
-This design addresses two defects found during code review:
-
-1. match lifecycle transitions are persisted in multiple independent writes, so
-   a mid-sequence database failure can leave the app in a logically impossible
-   state;
-2. subscriber broadcasts target `TelegramUserID` as the destination chat, so
-   subscriptions created outside a private chat can appear successful while
-   later broadcasts fail.
+This design addresses one defect found during code review: match lifecycle
+transitions are persisted in multiple independent writes, so a mid-sequence
+database failure can leave the app in a logically impossible state.
 
 The fix should keep the current package boundaries and runtime shape intact.
 The app remains a single-process local Go service backed by SQLite and a
 Telegram bot. The main change is to move multi-row lifecycle mutations behind
-transactional repository methods, and to store the Telegram chat target used for
-subscriber delivery explicitly instead of inferring it from the user record.
+transactional repository methods so the database either commits the entire
+transition or preserves the previous state.
 
 ## Goals
 
@@ -23,18 +18,17 @@ subscriber delivery explicitly instead of inferring it from the user record.
   transitions atomic from the caller's perspective
 - Prevent persisted `games`, `game_sets`, and `app_state` rows from drifting
   into combinations the UI cannot recover from
-- Make broadcast delivery target the chat that actually subscribed
 - Preserve the current command set and operator workflow
-- Add tests for the failure modes that produced the review findings
+- Add tests for the failure modes behind the review finding
 
 ## Non-Goals
 
-- Reworking the whole Telegram routing model
+- Reworking the Telegram routing model
 - Supporting multiple concurrent planned or active matches
-- Building a durable job queue for broadcasts
+- Removing persisted phase from the schema in this change
 - Introducing a generic transaction abstraction across every repository
 
-## Problem 1: Lifecycle Persistence Is Split Across Multiple Writes
+## Problem
 
 Today the Telegram handlers orchestrate lifecycle transitions by calling several
 repository methods in sequence. For example:
@@ -51,18 +45,6 @@ when present, later reads do not derive a safe phase from the actual set state.
 That means the control UI can become stuck in a phase that has no valid active
 set, or `/plan` can be blocked by an orphan non-finished game that was never
 made current.
-
-## Problem 2: Subscriptions Do Not Persist the Delivery Chat
-
-The user table stores a Telegram user identity and a `Subscribed` flag, but no
-chat target. Broadcast fan-out later sends to `ChatID = TelegramUserID`. That
-works only when the intended destination is a private DM with the same numeric
-identifier. If a user subscribes in a group or channel context, the bot records
-the subscription but does not retain the chat that should receive updates.
-
-This leaves the app with misleading behavior: `/start` confirms subscription,
-yet later broadcasts may fail because the stored destination is not the
-subscribed chat.
 
 ## Alternatives Considered
 
@@ -85,19 +67,17 @@ would reduce one class of drift.
 
 This helps but is not sufficient. The app can still persist an orphan planned
 game or a current-game pointer that does not match the intended lifecycle.
-Removing `Phase` is a broader behavioral change and is unnecessary to fix the
-reviewed defects.
+Removing `Phase` is a broader behavioral change and is unnecessary to fix this
+review finding.
 
-### C. Add Transactional Lifecycle Methods And Persist Broadcast Chat Targets
+### C. Add Transactional Lifecycle Methods
 
 This is the recommended approach.
 
 - move each multi-row lifecycle transition into one repository-level
   transactional method;
 - keep `Game.Phase` persisted for now, but only update it inside those atomic
-  methods;
-- add an explicit subscription chat target to storage and use it for broadcast
-  fan-out.
+  methods.
 
 This keeps the changes local, makes invariants enforceable in one place, and
 matches the existing architecture.
@@ -111,10 +91,10 @@ currently span multiple repository calls. The exact names can be finalized
 during implementation, but the shape should be close to:
 
 - `CreatePlannedGameAndSetCurrent(game *Game) error`
-- `StartGame(gameID uint, updatedGame *Game, initialSet *GameSet) error`
-- `StartNextSet(gameID uint, updatedGame *Game, nextSet *GameSet) error`
-- `FinishSet(gameID uint, finishedSet *GameSet, updatedGame *Game) error`
-- `FinishGameAndClearCurrent(gameID uint, updatedGame *Game) error`
+- `StartGame(updatedGame *Game, initialSet *GameSet) error`
+- `StartNextSet(updatedGame *Game, nextSet *GameSet) error`
+- `FinishSet(updatedGame *Game, finishedSet *GameSet) error`
+- `FinishGameAndClearCurrent(updatedGame *Game) error`
 
 Each method should run in a single SQLite transaction and either commit the
 entire transition or roll back completely. The Telegram layer may still compute
@@ -150,35 +130,6 @@ transaction:
 
 If the transaction fails, the previous state must remain intact.
 
-### Broadcast Delivery Target
-
-Storage should persist the chat used for subscription. The simplest design is to
-extend `storage.User` with a `SubscriptionChatID int64` field.
-
-Behavior:
-
-- `/start` upserts the user profile and records `SubscriptionChatID` from
-  `update.Message.Chat.ID`, then marks the user subscribed
-- `/stop` keeps using the current chat and may also refresh the stored
-  `SubscriptionChatID` so the latest subscription context is remembered
-- broadcasts send to `SubscriptionChatID`
-- subscribers with `SubscriptionChatID == 0` should be skipped defensively and
-  logged at warn level
-
-This keeps the current user-centric subscription model while making delivery
-match the actual subscribed chat.
-
-## Migration Strategy
-
-`AutoMigrate` should add the new nullable-or-zero-default subscription chat
-column without manual SQL migrations. Existing user rows will initially have
-`SubscriptionChatID = 0`. That is acceptable as a transitional state:
-
-- users who run `/start` again will get a valid chat target
-- broadcast code should skip `0` targets rather than attempting delivery
-
-No backfill is required for the first version.
-
 ## Telegram Handler Changes
 
 Handlers should become thinner:
@@ -193,22 +144,13 @@ This keeps business-rule decisions in `pkg/game`, Telegram-specific messaging in
 
 ## Error Handling
 
-Lifecycle transitions:
-
 - if a transactional write fails, the handler should not edit the control
   message, enqueue overlay work, or broadcast an update
 - the error should be logged with the operation name and game ID when present
 
-Subscriptions:
-
-- if persisting the subscription chat fails, `/start` or `/stop` should return
-  the existing generic error message
-- if a broadcast encounters a subscribed user with `SubscriptionChatID == 0`,
-  log and skip rather than failing the whole fan-out
-
 ## Testing Strategy
 
-Add focused tests for the exact failure modes behind the review findings.
+Add focused tests for the exact failure modes behind the review finding.
 
 Storage tests:
 
@@ -221,9 +163,8 @@ Storage tests:
 
 Telegram tests:
 
-- `/start` stores the subscription chat ID from the incoming message
-- broadcasts send to the stored chat ID, not `TelegramUserID`
-- a subscribed user with no stored chat is skipped
+- plan flow and game-control handlers use the transactional repository methods
+- failed transactional writes do not trigger later side effects
 
 Regression tests should continue proving the normal success paths.
 
@@ -231,10 +172,9 @@ Regression tests should continue proving the normal success paths.
 
 This change should be implemented in two stages:
 
-1. add the storage model and transactional repository methods with tests;
-2. update Telegram handlers to use the new methods and add broadcast chat tests.
+1. add the storage transactional methods with tests;
+2. update Telegram handlers to use them.
 
-No user-facing command changes are required. The only visible behavioral change
-is that subscriptions will reliably target the chat that actually subscribed,
-and lifecycle transitions will either fully commit or not change the database at
+No user-facing command changes are required. The visible result is that
+lifecycle transitions will either fully commit or not change the database at
 all.
