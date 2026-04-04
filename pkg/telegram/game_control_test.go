@@ -170,6 +170,24 @@ func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
 	requireNoCallback(t, callbacks, "game:finish")
 }
 
+func TestGameControlIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
+	game := &storage.Game{
+		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhaseBetweenSets,
+		CurrentSetNumber: 1,
+	}
+
+	view := buildGameControlMessage(game, "Home", "Guest", nil)
+	callbacks := keyboardCallbackData(t, view.Keyboard)
+
+	requireHasCallback(t, callbacks, "game:start")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallback(t, callbacks, "game:set:start_next")
+	requireNoCallback(t, callbacks, "game:finish")
+	requireNoCallbackPrefix(t, callbacks, "game:home:")
+	requireNoCallbackPrefix(t, callbacks, "game:guest:")
+}
+
 func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
 	game := &storage.Game{
 		Status:           storage.GameStatusInProgress,

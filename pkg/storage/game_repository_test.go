@@ -583,7 +583,7 @@ func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
 	})
 }
 
-func TestGameEffectivePhaseFallsBackFromLegacyBlankPhase(t *testing.T) {
+func TestGameEffectivePhaseAlwaysDerivesFromStatusAndActiveSet(t *testing.T) {
 	tests := []struct {
 		name         string
 		game         storage.Game
@@ -591,23 +591,23 @@ func TestGameEffectivePhaseFallsBackFromLegacyBlankPhase(t *testing.T) {
 		want         storage.GamePhase
 	}{
 		{
-			name: "stored phase wins",
+			name: "ignores stale stored phase",
 			game: storage.Game{
 				Status: storage.GameStatusInProgress,
 				Phase:  storage.GamePhaseBetweenSets,
 			},
 			hasActiveSet: true,
-			want:         storage.GamePhaseBetweenSets,
+			want:         storage.GamePhaseSetInProgress,
 		},
 		{
-			name: "planned falls back to planned",
+			name: "planned derives to planned",
 			game: storage.Game{
 				Status: storage.GameStatusPlanned,
 			},
 			want: storage.GamePhasePlanned,
 		},
 		{
-			name: "in progress with active set falls back to set in progress",
+			name: "in progress with active set derives to set in progress",
 			game: storage.Game{
 				Status: storage.GameStatusInProgress,
 			},
@@ -615,14 +615,14 @@ func TestGameEffectivePhaseFallsBackFromLegacyBlankPhase(t *testing.T) {
 			want:         storage.GamePhaseSetInProgress,
 		},
 		{
-			name: "in progress without active set falls back to between sets",
+			name: "in progress without active set derives to between sets",
 			game: storage.Game{
 				Status: storage.GameStatusInProgress,
 			},
 			want: storage.GamePhaseBetweenSets,
 		},
 		{
-			name: "finished falls back to finished",
+			name: "finished derives to finished",
 			game: storage.Game{
 				Status: storage.GameStatusFinished,
 			},

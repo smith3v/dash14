@@ -92,13 +92,9 @@ type Game struct {
 	UpdatedAt time.Time
 }
 
-// EffectivePhase returns the persisted phase when present. For older rows where
-// phase is blank, it falls back to a conservative derivation from the coarse
-// status plus active-set presence.
+// EffectivePhase derives the operator-visible phase from authoritative facts:
+// the coarse game status plus whether an unfinished set currently exists.
 func (g Game) EffectivePhase(hasActiveSet bool) GamePhase {
-	if g.Phase != "" {
-		return g.Phase
-	}
 	return DeriveGamePhase(g.Status, hasActiveSet)
 }
 
