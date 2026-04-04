@@ -212,11 +212,9 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		GuestTeamID:      guest.ID,
 		HomeTeamSide:     "left",
 		GuestTeamSide:    "right",
-		Status:           storage.GameStatusFinished,
-		Phase:            storage.GamePhaseFinished,
-		CurrentSetNumber: 4,
-		HomeSetsWon:      3,
-		GuestSetsWon:     1,
+		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
+		CurrentSetNumber: 1,
 	}
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
@@ -239,8 +237,8 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 	if err != nil {
 		t.Fatalf("read initial output: %v", err)
 	}
-	if !strings.Contains(string(data), "finished-v1 Very Long Home Team Name") {
-		t.Fatalf("initial output = %q, want finished-v1 content", string(data))
+	if !strings.Contains(string(data), "planned Very Long Home Team Name") {
+		t.Fatalf("initial output = %q, want planned content", string(data))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -253,8 +251,8 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		renderer,
 	)
 
-	if err := os.WriteFile(finishedTpl, []byte("finished-v2 {{.HomeTeamName}}"), 0o644); err != nil {
-		t.Fatalf("write updated finished template: %v", err)
+	if err := os.WriteFile(plannedTpl, []byte("planned-v2 {{.HomeTeamName}}"), 0o644); err != nil {
+		t.Fatalf("write updated planned template: %v", err)
 	}
 
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -263,11 +261,11 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		if err != nil {
 			t.Fatalf("read refreshed output: %v", err)
 		}
-		if strings.Contains(string(data), "finished-v2 Very Long Home Team Name") {
+		if strings.Contains(string(data), "planned-v2 Very Long Home Team Name") {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("refreshed output = %q, want finished-v2 content", string(data))
+			t.Fatalf("refreshed output = %q, want planned-v2 content", string(data))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
