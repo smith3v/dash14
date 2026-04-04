@@ -360,6 +360,7 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	beforeIntermission := renderer.intermissionCount()
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
@@ -382,8 +383,10 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set finish, got err=%v", err)
 	}
-	waitForCondition(t, "intermission overlay render after set finish", func() bool { return renderer.intermissionCount() > 0 })
-	if renderer.intermissionCount() == 0 {
+	waitForCondition(t, "intermission overlay render after set finish", func() bool {
+		return renderer.intermissionCount() > beforeIntermission
+	})
+	if renderer.intermissionCount() == beforeIntermission {
 		t.Fatal("expected intermission overlay rendering after set finish")
 	}
 	last := renderer.lastIntermission()
@@ -431,6 +434,7 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	beforeIntermission := renderer.intermissionCount()
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish4", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
@@ -453,7 +457,9 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set 4 finish prompt, got err=%v", err)
 	}
-	waitForCondition(t, "intermission overlay render after set 4 finish", func() bool { return renderer.intermissionCount() > 0 })
+	waitForCondition(t, "intermission overlay render after set 4 finish", func() bool {
+		return renderer.intermissionCount() > beforeIntermission
+	})
 }
 
 func TestGameControlBroadcastTextGeneration(t *testing.T) {
