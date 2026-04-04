@@ -22,6 +22,36 @@ type planTestStore struct {
 	games *storage.GameRepository
 }
 
+type txFailGames struct {
+	inner         *storage.GameRepository
+	failCreate    bool
+	failWithinTx  bool
+}
+
+func (g *txFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	if g.failWithinTx {
+		return fmt.Errorf("simulated transaction setup failure")
+	}
+	return g.inner.WithinTx(func(repo *storage.GameRepository) error {
+		if g.failCreate {
+			return fmt.Errorf("simulated create failure")
+		}
+		return fn(repo)
+	})
+}
+
+func (g *txFailGames) CreateGame(game *storage.Game) error                  { return g.inner.CreateGame(game) }
+func (g *txFailGames) CreateSet(set *storage.GameSet) error                 { return g.inner.CreateSet(set) }
+func (g *txFailGames) GetCurrentGame() (*storage.Game, error)               { return g.inner.GetCurrentGame() }
+func (g *txFailGames) GetNonFinishedGame() (*storage.Game, error)           { return g.inner.GetNonFinishedGame() }
+func (g *txFailGames) GetGameByID(id uint) (*storage.Game, error)           { return g.inner.GetGameByID(id) }
+func (g *txFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error)   { return g.inner.GetActiveSet(gameID) }
+func (g *txFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
+	return g.inner.ListSetsByGameID(gameID)
+}
+func (g *txFailGames) SaveGame(game *storage.Game) error { return g.inner.SaveGame(game) }
+func (g *txFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
+
 type fakeOverlayRenderer struct {
 	mu           sync.Mutex
 	planned      []overlay.PlannedViewModel
@@ -473,8 +503,9 @@ func TestPlanCreateGameFromGuestSelection(t *testing.T) {
 	}
 }
 
-// TestPlanRejectedWhenNonFinishedGameExists verifies /plan is blocked when
-// there is already a planned or in-progress game.
+// TestPlanRejectedWhenNonFinishedGameExists verifies planned-game creation is
+// rejected by the SQLite invariant when there is already a planned or
+// in-progress game.
 func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
@@ -500,6 +531,8 @@ func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 	}
 
 	r.handlePlan(ctx, nil, makeTextUpdate(userID, chatID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Home Two"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Guest Two"))
 
 	msgs := fb.SentMessages()
 	if len(msgs) == 0 {
@@ -508,5 +541,46 @@ func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 	last := msgs[len(msgs)-1]
 	if !strings.Contains(last.Text, "another game is still planned or in progress") {
 		t.Fatalf("unexpected rejection message: %q", last.Text)
+	}
+}
+
+func TestPlanTransactionalFailureSendsRetrySafeMessageAndSkipsOverlay(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+	r.games = &txFailGames{inner: store.games, failCreate: true}
+	ctx := context.Background()
+
+	const userID int64 = 7103
+	const chatID int64 = 8103
+	store.createAdminUser(t, userID, "planner3")
+
+	insertTeam(t, store.teams, "home3", "Home Three", "H3")
+	insertTeam(t, store.teams, "guest3", "Guest Three", "G3")
+
+	r.handlePlan(ctx, nil, makeTextUpdate(userID, chatID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Home Three"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(userID, chatID, "Guest Three"))
+
+	current, err := store.games.GetCurrentGame()
+	if err != nil {
+		t.Fatalf("GetCurrentGame: %v", err)
+	}
+	if current != nil {
+		t.Fatalf("expected no current game after transactional failure, got %d", current.ID)
+	}
+	if renderer.plannedCount() != 0 {
+		t.Fatalf("expected no planned render after transactional failure, got %d", renderer.plannedCount())
+	}
+	if renderer.intermissionCount() != 0 {
+		t.Fatalf("expected no intermission render after transactional failure, got %d", renderer.intermissionCount())
+	}
+
+	msgs := fb.SentMessages()
+	if len(msgs) == 0 {
+		t.Fatal("expected failure message")
+	}
+	last := msgs[len(msgs)-1]
+	if !strings.Contains(last.Text, "state was not changed") {
+		t.Fatalf("expected retry-safe failure message, got %q", last.Text)
 	}
 }

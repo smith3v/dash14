@@ -823,6 +823,9 @@ type saveFailGames struct {
 	failSaveSet  bool
 }
 
+func (g *saveFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	return g.inner.WithinTx(fn)
+}
 func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
 func (g *saveFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
 func (g *saveFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }

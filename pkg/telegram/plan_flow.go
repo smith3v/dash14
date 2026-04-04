@@ -52,24 +52,6 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 
-	nonFinished, err := r.games.GetNonFinishedGame()
-	if err != nil {
-		r.logger.ErrorContext(ctx, "handlePlan: failed to check current game",
-			"user_id", userID, "err", err)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Something went wrong. Please try again.",
-		})
-		return
-	}
-	if nonFinished != nil {
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Cannot run /plan: another game is still planned or in progress.",
-		})
-		return
-	}
-
 	// Reset (or create) the plan state for this admin.
 	r.plans.Store(userID, &planState{})
 
@@ -360,24 +342,6 @@ func (r *Router) finalizePlannedGame(
 		return
 	}
 
-	nonFinished, err := r.games.GetNonFinishedGame()
-	if err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: check non-finished game failed",
-			"user_id", userID, "err", err)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Something went wrong. Please try again.",
-		})
-		return
-	}
-	if nonFinished != nil {
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Cannot run /plan: another game is still planned or in progress.",
-		})
-		return
-	}
-
 	game := &storage.Game{
 		HomeTeamID:         state.HomeTeam.ID,
 		GuestTeamID:        guestTeam.ID,
@@ -388,12 +352,19 @@ func (r *Router) finalizePlannedGame(
 		Phase:              storage.GamePhasePlanned,
 		CurrentAdminUserID: userID,
 	}
-	if err := r.games.CreateGame(game); err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: create game failed",
+
+	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+		return repo.CreateGame(game)
+	}); err != nil {
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: transactional create failed",
 			"user_id", userID, "err", err)
+		text := "Planning failed. Match state was not changed. Please try again."
+		if isSingleActiveGameConstraintError(err) {
+			text = "Cannot run /plan: another game is still planned or in progress."
+		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
-			Text:   "Something went wrong. Please try again.",
+			Text:   text,
 		})
 		return
 	}
@@ -452,4 +423,13 @@ func (r *Router) finalizePlannedGame(
 			guestTeam.Name,
 		),
 	})
+}
+
+func isSingleActiveGameConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "idx_games_single_non_finished") ||
+		strings.Contains(msg, "UNIQUE constraint failed")
 }
