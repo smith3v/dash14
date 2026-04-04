@@ -269,9 +269,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if err := r.games.SaveGame(game); err != nil {
 			return
 		}
-		if err := r.games.ClearCurrentGameID(); err != nil {
-			return
-		}
 		broadcastText = fmt.Sprintf(
 			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
 			home.Name,

@@ -121,9 +121,6 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
 	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
-	}
 
 	cfg := config.Config{
 		Telegram: config.TelegramConfig{Token: "token"},
@@ -223,9 +220,6 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 	}
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
-	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
 	}
 
 	renderer := overlay.NewRenderer(config.OverlayConfig{
@@ -327,9 +321,6 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
 	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
-	}
 
 	cfg := config.Config{
 		Telegram: config.TelegramConfig{Token: "token"},
@@ -413,9 +404,6 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 	}
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
-	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
 	}
 	if err := games.CreateSet(&storage.GameSet{
 		GameID:     current.ID,
@@ -524,9 +512,6 @@ func TestRunWithDepsRuntimeRendersBetweenSetsOnMainOverlay(t *testing.T) {
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
 	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
-	}
 	if err := games.CreateSet(&storage.GameSet{
 		GameID:     current.ID,
 		SetNumber:  1,
@@ -623,9 +608,6 @@ func TestRunWithDepsRuntimeDerivesBetweenSetsForLegacyGameWithoutActiveSet(t *te
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
 	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
-	}
 	if err := games.CreateSet(&storage.GameSet{
 		GameID:     current.ID,
 		SetNumber:  1,
@@ -672,7 +654,7 @@ func TestRunWithDepsRuntimeDerivesBetweenSetsForLegacyGameWithoutActiveSet(t *te
 	}
 }
 
-func TestRunWithDepsRuntimeRendersFinishedOnMainOverlay(t *testing.T) {
+func TestRunWithDepsRuntimeDoesNotRenderFinishedGameWithoutCurrentMatch(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "dash14.db")
 	outputPath := filepath.Join(dir, "overlay", "current.html")
@@ -724,9 +706,6 @@ func TestRunWithDepsRuntimeRendersFinishedOnMainOverlay(t *testing.T) {
 	if err := games.CreateGame(current); err != nil {
 		t.Fatalf("create game: %v", err)
 	}
-	if err := games.SetCurrentGameID(current.ID); err != nil {
-		t.Fatalf("set current game: %v", err)
-	}
 	if err := games.CreateSet(&storage.GameSet{
 		GameID:     current.ID,
 		SetNumber:  1,
@@ -769,15 +748,10 @@ func TestRunWithDepsRuntimeRendersFinishedOnMainOverlay(t *testing.T) {
 		t.Fatalf("runWithDeps runtime mode: %v", err)
 	}
 
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read main overlay output: %v", err)
-	}
-	got := string(data)
-	if !strings.Contains(got, "finished-main 3-1 set1 25-19 set2 17-25") {
-		t.Fatalf("expected finished main overlay, got %q", got)
-	}
-	if strings.Contains(got, "intermission-side") || strings.Contains(got, "live ") || strings.Contains(got, "planned ") {
-		t.Fatalf("expected only finished main overlay content, got %q", got)
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		if err != nil {
+			t.Fatalf("stat main overlay output: %v", err)
+		}
+		t.Fatalf("expected no main overlay output for finished-only history, found %s", outputPath)
 	}
 }

@@ -220,40 +220,35 @@ func TestGetActiveSet(t *testing.T) {
 	})
 }
 
-// TestAppStateSingleton covers the three AppState scenarios: SetCurrentGameID,
-// GetCurrentGame, and ClearCurrentGameID.
-func TestAppStateSingleton(t *testing.T) {
+// TestGetCurrentGame verifies that current-game lookup follows the single
+// non-finished game rather than the AppState pointer row.
+func TestGetCurrentGame(t *testing.T) {
 	db := openTestDB(t)
 	homeID, guestID := seedTeams(t, db)
 	repo := storage.NewGameRepository(db)
 
-	t.Run("get_current_game_returns_nil_when_no_state", func(t *testing.T) {
+	t.Run("returns_nil_when_no_non_finished_game_exists", func(t *testing.T) {
 		game, err := repo.GetCurrentGame()
 		if err != nil {
-			t.Fatalf("GetCurrentGame with no AppState row: %v", err)
+			t.Fatalf("GetCurrentGame: %v", err)
 		}
 		if game != nil {
 			t.Errorf("expected nil game, got game with ID %d", game.ID)
 		}
 	})
 
-	// Create a game to point at.
-	game := &storage.Game{
-		HomeTeamID:       homeID,
-		GuestTeamID:      guestID,
-		HomeTeamSide:     "left",
-		GuestTeamSide:    "right",
-		Status:           storage.GameStatusPlanned,
-		Phase:            storage.GamePhasePlanned,
-		CurrentSetNumber: 1,
-	}
-	if err := repo.CreateGame(game); err != nil {
-		t.Fatalf("CreateGame: %v", err)
-	}
-
-	t.Run("set_and_get_current_game", func(t *testing.T) {
-		if err := repo.SetCurrentGameID(game.ID); err != nil {
-			t.Fatalf("SetCurrentGameID: %v", err)
+	t.Run("returns_non_finished_game_without_app_state_row", func(t *testing.T) {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			Phase:            storage.GamePhasePlanned,
+			CurrentSetNumber: 1,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
 		}
 
 		got, err := repo.GetCurrentGame()
@@ -266,54 +261,40 @@ func TestAppStateSingleton(t *testing.T) {
 		if got.ID != game.ID {
 			t.Errorf("GetCurrentGame ID: got %d, want %d", got.ID, game.ID)
 		}
-	})
-
-	t.Run("set_is_idempotent_upsert", func(t *testing.T) {
-		// Calling SetCurrentGameID twice must not create a second row.
-		if err := repo.SetCurrentGameID(game.ID); err != nil {
-			t.Fatalf("second SetCurrentGameID: %v", err)
-		}
 
 		var count int64
-		db.Model(&storage.AppState{}).Count(&count)
-		if count != 1 {
-			t.Errorf("expected exactly 1 AppState row, got %d", count)
+		if err := db.Model(&storage.AppState{}).Count(&count).Error; err != nil {
+			t.Fatalf("count AppState rows: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected 0 AppState rows, got %d", count)
 		}
 	})
 
-	t.Run("clear_current_game_id", func(t *testing.T) {
-		if err := repo.ClearCurrentGameID(); err != nil {
-			t.Fatalf("ClearCurrentGameID: %v", err)
+	t.Run("returns_nil_when_all_games_are_finished", func(t *testing.T) {
+		db := openTestDB(t)
+		homeID, guestID := seedTeams(t, db)
+		repo := storage.NewGameRepository(db)
+
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusFinished,
+			Phase:            storage.GamePhaseFinished,
+			CurrentSetNumber: 4,
+		}
+		if err := repo.CreateGame(game); err != nil {
+			t.Fatalf("CreateGame: %v", err)
 		}
 
 		got, err := repo.GetCurrentGame()
 		if err != nil {
-			t.Fatalf("GetCurrentGame after clear: %v", err)
+			t.Fatalf("GetCurrentGame: %v", err)
 		}
 		if got != nil {
-			t.Errorf("expected nil after ClearCurrentGameID, got game ID %d", got.ID)
-		}
-
-		// Confirm the singleton row still exists (just with nil CurrentGameID).
-		var count int64
-		db.Model(&storage.AppState{}).Count(&count)
-		if count != 1 {
-			t.Errorf("expected exactly 1 AppState row after clear, got %d", count)
-		}
-	})
-
-	t.Run("set_after_clear_works", func(t *testing.T) {
-		// Re-setting after a clear must work correctly.
-		if err := repo.SetCurrentGameID(game.ID); err != nil {
-			t.Fatalf("SetCurrentGameID after clear: %v", err)
-		}
-
-		got, err := repo.GetCurrentGame()
-		if err != nil {
-			t.Fatalf("GetCurrentGame after re-set: %v", err)
-		}
-		if got == nil || got.ID != game.ID {
-			t.Errorf("expected game ID %d, got %v", game.ID, got)
+			t.Errorf("expected nil current game, got %d", got.ID)
 		}
 	})
 }

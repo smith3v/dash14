@@ -31,8 +31,6 @@ type GameStore interface {
 	ListSetsByGameID(gameID uint) ([]storage.GameSet, error)
 	SaveGame(game *storage.Game) error
 	SaveSet(set *storage.GameSet) error
-	SetCurrentGameID(id uint) error
-	ClearCurrentGameID() error
 }
 
 // Router dispatches Telegram updates to the correct handler.

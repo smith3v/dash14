@@ -49,22 +49,21 @@ func (r *GameRepository) CreateSet(set *GameSet) error {
 	return nil
 }
 
-// GetCurrentGame returns the game pointed to by AppState.CurrentGameID. It
-// returns nil, nil when no current game is set (AppState row absent or
-// CurrentGameID is nil).
+// GetCurrentGame returns the single non-finished game. It returns nil, nil
+// when no planned/in-progress game exists.
 func (r *GameRepository) GetCurrentGame() (*Game, error) {
-	var state AppState
-	err := r.db.First(&state, 1).Error
+	var game Game
+	err := r.db.
+		Where("status <> ?", GameStatusFinished).
+		Order("id DESC").
+		First(&game).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("storage: get app state: %w", err)
+		return nil, fmt.Errorf("storage: get current game: %w", err)
 	}
-	if state.CurrentGameID == nil {
-		return nil, nil
-	}
-	return r.GetGameByID(*state.CurrentGameID)
+	return &game, nil
 }
 
 // GetNonFinishedGame returns one game whose status is not finished.

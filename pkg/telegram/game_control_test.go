@@ -53,9 +53,6 @@ func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64)
 	if err := store.games.CreateGame(game); err != nil {
 		t.Fatalf("CreateGame: %v", err)
 	}
-	if err := store.games.SetCurrentGameID(game.ID); err != nil {
-		t.Fatalf("SetCurrentGameID: %v", err)
-	}
 	return game
 }
 
@@ -821,9 +818,6 @@ func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
 	return g.inner.ListSetsByGameID(gameID)
 }
-func (g *saveFailGames) SetCurrentGameID(id uint) error { return g.inner.SetCurrentGameID(id) }
-func (g *saveFailGames) ClearCurrentGameID() error      { return g.inner.ClearCurrentGameID() }
-
 func (g *saveFailGames) SaveGame(game *storage.Game) error {
 	if g.failSaveGame {
 		return errors.New("simulated save game failure")

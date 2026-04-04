@@ -420,8 +420,8 @@ func TestPlanMoreThan8(t *testing.T) {
 }
 
 // TestPlanCreateGameFromGuestSelection verifies that after selecting home and
-// guest teams, /plan creates a planned game, assigns the current admin, sets
-// app state, and renders the planned overlay.
+// guest teams, /plan creates a planned game, assigns the current admin, and
+// renders the planned overlay.
 func TestPlanCreateGameFromGuestSelection(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, renderer := newPlanRouter(t, store)
@@ -497,9 +497,6 @@ func TestPlanRejectedWhenNonFinishedGameExists(t *testing.T) {
 	}
 	if err := store.games.CreateGame(existing); err != nil {
 		t.Fatalf("CreateGame: %v", err)
-	}
-	if err := store.games.SetCurrentGameID(existing.ID); err != nil {
-		t.Fatalf("SetCurrentGameID: %v", err)
 	}
 
 	r.handlePlan(ctx, nil, makeTextUpdate(userID, chatID, "/plan"))

@@ -397,15 +397,6 @@ func (r *Router) finalizePlannedGame(
 		})
 		return
 	}
-	if err := r.games.SetCurrentGameID(game.ID); err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: set current game failed",
-			"user_id", userID, "game_id", game.ID, "err", err)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Something went wrong. Please try again.",
-		})
-		return
-	}
 
 	vm := overlay.PlannedViewModel{
 		HomeTeamName:       state.HomeTeam.Name,
