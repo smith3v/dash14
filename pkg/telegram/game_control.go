@@ -132,146 +132,183 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 
 	broadcastText := ""
 	var overlayJob *overlayJob
-	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
-
-	switch data {
-	case "game:start":
-		if phase != storage.GamePhasePlanned {
-			return
-		}
-		gState, setState, err := game2.StartPlannedGame(toGameState(game))
+	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
+		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
-			return
+			return err
 		}
-		applyGameState(game, gState)
-		if err := r.games.SaveGame(game); err != nil {
-			return
-		}
-		newSet := &storage.GameSet{
-			GameID:     game.ID,
-			SetNumber:  setState.SetNumber,
-			HomeScore:  setState.HomeScore,
-			GuestScore: setState.GuestScore,
-			IsFinished: false,
-		}
-		if err := r.games.CreateSet(newSet); err != nil {
-			return
-		}
-		activeSet = newSet
-		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
-
-	case "game:set:start_next":
-		if phase != storage.GamePhaseBetweenSets {
-			return
-		}
-		gState, setState, err := game2.StartNextSet(toGameState(game))
+		txActiveSet, err := repo.GetActiveSet(game.ID)
 		if err != nil {
-			return
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			txActiveSet = nil
 		}
-		applyGameState(game, gState)
-		if err := r.games.SaveGame(game); err != nil {
-			return
-		}
-		nextSet := &storage.GameSet{
-			GameID:     game.ID,
-			SetNumber:  setState.SetNumber,
-			HomeScore:  setState.HomeScore,
-			GuestScore: setState.GuestScore,
-			IsFinished: false,
-		}
-		if err := r.games.CreateSet(nextSet); err != nil {
-			return
-		}
-		activeSet = nextSet
-		broadcastText = fmt.Sprintf(
-			"Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
-			nextSet.SetNumber,
-			home.Name,
-			guest.Name,
-			game.HomeSetsWon,
-			game.GuestSetsWon,
-		)
+		phase := txGame.EffectivePhase(txActiveSet != nil && !txActiveSet.IsFinished)
 
-	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
-		if phase != storage.GamePhaseSetInProgress || activeSet == nil {
-			return
-		}
-		score := game2.SetScore{
-			HomeScore:          activeSet.HomeScore,
-			GuestScore:         activeSet.GuestScore,
-			SetNumber:          activeSet.SetNumber,
-			SideSwitchedInSet5: game.SideSwitchedInSet5,
-		}
-		var result game2.ScoreResult
 		switch data {
-		case "game:home:+1":
-			result = game2.IncrementHome(score)
-		case "game:home:-1":
-			result = game2.DecrementHome(score)
-		case "game:guest:+1":
-			result = game2.IncrementGuest(score)
-		case "game:guest:-1":
-			result = game2.DecrementGuest(score)
-		}
+		case "game:start":
+			if phase != storage.GamePhasePlanned {
+				return nil
+			}
+			gState, setState, err := game2.StartPlannedGame(toGameState(txGame))
+			if err != nil {
+				return err
+			}
+			applyGameState(txGame, gState)
+			if err := repo.SaveGame(txGame); err != nil {
+				return err
+			}
+			return repo.CreateSet(&storage.GameSet{
+				GameID:     txGame.ID,
+				SetNumber:  setState.SetNumber,
+				HomeScore:  setState.HomeScore,
+				GuestScore: setState.GuestScore,
+				IsFinished: false,
+			})
 
-		activeSet.HomeScore = result.Set.HomeScore
-		activeSet.GuestScore = result.Set.GuestScore
-		if err := r.games.SaveSet(activeSet); err != nil {
-			return
-		}
+		case "game:set:start_next":
+			if phase != storage.GamePhaseBetweenSets {
+				return nil
+			}
+			gState, setState, err := game2.StartNextSet(toGameState(txGame))
+			if err != nil {
+				return err
+			}
+			applyGameState(txGame, gState)
+			if err := repo.SaveGame(txGame); err != nil {
+				return err
+			}
+			return repo.CreateSet(&storage.GameSet{
+				GameID:     txGame.ID,
+				SetNumber:  setState.SetNumber,
+				HomeScore:  setState.HomeScore,
+				GuestScore: setState.GuestScore,
+				IsFinished: false,
+			})
 
-		if result.SideSwitch {
-			game.HomeTeamSide, game.GuestTeamSide = game.GuestTeamSide, game.HomeTeamSide
-		}
-		game.SideSwitchedInSet5 = result.Set.SideSwitchedInSet5
-		if err := r.games.SaveGame(game); err != nil {
-			return
-		}
-		broadcastText = formatBroadcastScore(game, home, guest, activeSet)
+		case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
+			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
+				return nil
+			}
+			score := game2.SetScore{
+				HomeScore:          txActiveSet.HomeScore,
+				GuestScore:         txActiveSet.GuestScore,
+				SetNumber:          txActiveSet.SetNumber,
+				SideSwitchedInSet5: txGame.SideSwitchedInSet5,
+			}
+			var result game2.ScoreResult
+			switch data {
+			case "game:home:+1":
+				result = game2.IncrementHome(score)
+			case "game:home:-1":
+				result = game2.DecrementHome(score)
+			case "game:guest:+1":
+				result = game2.IncrementGuest(score)
+			case "game:guest:-1":
+				result = game2.DecrementGuest(score)
+			}
 
-	case "game:set:finish":
-		if phase != storage.GamePhaseSetInProgress || activeSet == nil {
-			return
-		}
-		setState := game2.SetState{
-			SetScore: game2.SetScore{
-				HomeScore:          activeSet.HomeScore,
-				GuestScore:         activeSet.GuestScore,
-				SetNumber:          activeSet.SetNumber,
-				SideSwitchedInSet5: game.SideSwitchedInSet5,
-			},
-			IsFinished: activeSet.IsFinished,
-		}
-		res, err := game2.ConfirmSetFinished(toGameState(game), setState)
-		if err != nil {
-			return
-		}
-		activeSet.IsFinished = true
-		if err := r.games.SaveSet(activeSet); err != nil {
-			return
-		}
+			txActiveSet.HomeScore = result.Set.HomeScore
+			txActiveSet.GuestScore = result.Set.GuestScore
+			if err := repo.SaveSet(txActiveSet); err != nil {
+				return err
+			}
+			if result.SideSwitch {
+				txGame.HomeTeamSide, txGame.GuestTeamSide = txGame.GuestTeamSide, txGame.HomeTeamSide
+			}
+			txGame.SideSwitchedInSet5 = result.Set.SideSwitchedInSet5
+			return repo.SaveGame(txGame)
 
-		applyGameState(game, res.Game)
-		if err := r.games.SaveGame(game); err != nil {
+		case "game:set:finish":
+			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
+				return nil
+			}
+			setState := game2.SetState{
+				SetScore: game2.SetScore{
+					HomeScore:          txActiveSet.HomeScore,
+					GuestScore:         txActiveSet.GuestScore,
+					SetNumber:          txActiveSet.SetNumber,
+					SideSwitchedInSet5: txGame.SideSwitchedInSet5,
+				},
+				IsFinished: txActiveSet.IsFinished,
+			}
+			res, err := game2.ConfirmSetFinished(toGameState(txGame), setState)
+			if err != nil {
+				return err
+			}
+			txActiveSet.IsFinished = true
+			if err := repo.SaveSet(txActiveSet); err != nil {
+				return err
+			}
+			applyGameState(txGame, res.Game)
+			return repo.SaveGame(txGame)
+
+		case "game:finish":
+			if phase != storage.GamePhaseBetweenSets {
+				return nil
+			}
+			res, err := game2.ConfirmGameFinished(toGameState(txGame))
+			if err != nil {
+				return err
+			}
+			applyGameState(txGame, res.Game)
+			return repo.SaveGame(txGame)
+
+		case "game:reverse":
+			res := game2.ReverseOverlaySides(toGameState(txGame))
+			applyGameState(txGame, res.Game)
+			return repo.SaveGame(txGame)
+
+		default:
+			return errUnhandledGameCallback
+		}
+	})
+	if errors.Is(err, errUnhandledGameCallback) {
+		return
+	}
+	if err != nil {
+		r.logger.ErrorContext(ctx, "handleGameCallback: transactional write failed",
+			"game_id", game.ID, "action", data, "err", err)
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Action failed. Match state was not changed. Please try again.",
+		})
+		return
+	}
+
+	game, err = r.games.GetGameByID(game.ID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "handleGameCallback: reload game failed", "game_id", game.ID, "action", data, "err", err)
+		return
+	}
+	activeSet, err = r.games.GetActiveSet(game.ID)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			r.logger.ErrorContext(ctx, "handleGameCallback: reload active set failed", "game_id", game.ID, "action", data, "err", err)
 			return
 		}
 		activeSet = nil
-
+	}
+	switch data {
+	case "game:start":
+		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
+	case "game:set:start_next":
+		if activeSet != nil {
+			broadcastText = fmt.Sprintf(
+				"Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
+				activeSet.SetNumber,
+				home.Name,
+				guest.Name,
+				game.HomeSetsWon,
+				game.GuestSetsWon,
+			)
+		}
+	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
+		if activeSet != nil {
+			broadcastText = formatBroadcastScore(game, home, guest, activeSet)
+		}
 	case "game:finish":
-		if phase != storage.GamePhaseBetweenSets {
-			return
-		}
-		res, err := game2.ConfirmGameFinished(toGameState(game))
-		if err != nil {
-			return
-		}
-		applyGameState(game, res.Game)
-		if err := r.games.SaveGame(game); err != nil {
-			return
-		}
-		if err := r.games.ClearCurrentGameID(); err != nil {
-			return
-		}
 		broadcastText = fmt.Sprintf(
 			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
 			home.Name,
@@ -279,17 +316,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			game.GuestSetsWon,
 			guest.Name,
 		)
-
 	case "game:reverse":
-		res := game2.ReverseOverlaySides(toGameState(game))
-		applyGameState(game, res.Game)
-		if err := r.games.SaveGame(game); err != nil {
-			return
-		}
 		broadcastText = fmt.Sprintf("Overlay sides reversed for %s vs %s", home.Name, guest.Name)
-
-	default:
-		return
 	}
 	if r.renderer != nil {
 		job, err := r.buildOverlayJob(game, home, guest, activeSet)
@@ -320,6 +348,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
 	}
 }
+
+var errUnhandledGameCallback = errors.New("telegram: unhandled game callback")
 
 type controlView struct {
 	Text     string

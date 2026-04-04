@@ -23,5 +23,12 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return fmt.Errorf("storage: automigrate: %w", err)
 	}
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_games_single_non_finished
+		ON games ((1))
+		WHERE status <> 'finished'
+	`).Error; err != nil {
+		return fmt.Errorf("storage: create single non-finished game index: %w", err)
+	}
 	return nil
 }

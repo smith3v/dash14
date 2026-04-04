@@ -19,6 +19,17 @@ func NewGameRepository(db *gorm.DB) *GameRepository {
 	return &GameRepository{db: db}
 }
 
+// WithinTx runs fn inside a single database transaction using a repository
+// backed by the transactional DB handle.
+func (r *GameRepository) WithinTx(fn func(repo *GameRepository) error) error {
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(NewGameRepository(tx))
+	}); err != nil {
+		return fmt.Errorf("storage: transaction failed: %w", err)
+	}
+	return nil
+}
+
 // CreateGame inserts a new Game record and populates its ID on success.
 func (r *GameRepository) CreateGame(game *Game) error {
 	if game.Phase == "" {
@@ -38,22 +49,21 @@ func (r *GameRepository) CreateSet(set *GameSet) error {
 	return nil
 }
 
-// GetCurrentGame returns the game pointed to by AppState.CurrentGameID. It
-// returns nil, nil when no current game is set (AppState row absent or
-// CurrentGameID is nil).
+// GetCurrentGame returns the single non-finished game. It returns nil, nil
+// when no planned/in-progress game exists.
 func (r *GameRepository) GetCurrentGame() (*Game, error) {
-	var state AppState
-	err := r.db.First(&state, 1).Error
+	var game Game
+	err := r.db.
+		Where("status <> ?", GameStatusFinished).
+		Order("id DESC").
+		First(&game).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("storage: get app state: %w", err)
+		return nil, fmt.Errorf("storage: get current game: %w", err)
 	}
-	if state.CurrentGameID == nil {
-		return nil, nil
-	}
-	return r.GetGameByID(*state.CurrentGameID)
+	return &game, nil
 }
 
 // GetNonFinishedGame returns one game whose status is not finished.

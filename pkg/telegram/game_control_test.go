@@ -53,9 +53,6 @@ func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64)
 	if err := store.games.CreateGame(game); err != nil {
 		t.Fatalf("CreateGame: %v", err)
 	}
-	if err := store.games.SetCurrentGameID(game.ID); err != nil {
-		t.Fatalf("SetCurrentGameID: %v", err)
-	}
 	return game
 }
 
@@ -171,6 +168,24 @@ func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
 	requireNoCallback(t, callbacks, "game:start")
 	requireNoCallback(t, callbacks, "game:set:start_next")
 	requireNoCallback(t, callbacks, "game:finish")
+}
+
+func TestGameControlIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
+	game := &storage.Game{
+		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhaseBetweenSets,
+		CurrentSetNumber: 1,
+	}
+
+	view := buildGameControlMessage(game, "Home", "Guest", nil)
+	callbacks := keyboardCallbackData(t, view.Keyboard)
+
+	requireHasCallback(t, callbacks, "game:start")
+	requireHasCallback(t, callbacks, "game:reverse")
+	requireNoCallback(t, callbacks, "game:set:start_next")
+	requireNoCallback(t, callbacks, "game:finish")
+	requireNoCallbackPrefix(t, callbacks, "game:home:")
+	requireNoCallbackPrefix(t, callbacks, "game:guest:")
 }
 
 func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
@@ -345,6 +360,7 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	beforeIntermission := renderer.intermissionCount()
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
@@ -367,8 +383,10 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set finish, got err=%v", err)
 	}
-	waitForCondition(t, "intermission overlay render after set finish", func() bool { return renderer.intermissionCount() > 0 })
-	if renderer.intermissionCount() == 0 {
+	waitForCondition(t, "intermission overlay render after set finish", func() bool {
+		return renderer.intermissionCount() > beforeIntermission
+	})
+	if renderer.intermissionCount() == beforeIntermission {
 		t.Fatal("expected intermission overlay rendering after set finish")
 	}
 	last := renderer.lastIntermission()
@@ -416,6 +434,7 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	beforeIntermission := renderer.intermissionCount()
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish4", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
@@ -438,7 +457,9 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected no active set after set 4 finish prompt, got err=%v", err)
 	}
-	waitForCondition(t, "intermission overlay render after set 4 finish", func() bool { return renderer.intermissionCount() > 0 })
+	waitForCondition(t, "intermission overlay render after set 4 finish", func() bool {
+		return renderer.intermissionCount() > beforeIntermission
+	})
 }
 
 func TestGameControlBroadcastTextGeneration(t *testing.T) {
@@ -804,10 +825,15 @@ func (b *blockingOverlayRenderer) totalCalls() int {
 
 type saveFailGames struct {
 	inner        *storage.GameRepository
-	failSaveGame bool
-	failSaveSet  bool
+	failWithinTx bool
 }
 
+func (g *saveFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	if g.failWithinTx {
+		return errors.New("simulated transactional failure")
+	}
+	return g.inner.WithinTx(fn)
+}
 func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
 func (g *saveFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
 func (g *saveFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
@@ -821,22 +847,8 @@ func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
 	return g.inner.ListSetsByGameID(gameID)
 }
-func (g *saveFailGames) SetCurrentGameID(id uint) error { return g.inner.SetCurrentGameID(id) }
-func (g *saveFailGames) ClearCurrentGameID() error      { return g.inner.ClearCurrentGameID() }
-
-func (g *saveFailGames) SaveGame(game *storage.Game) error {
-	if g.failSaveGame {
-		return errors.New("simulated save game failure")
-	}
-	return g.inner.SaveGame(game)
-}
-
-func (g *saveFailGames) SaveSet(set *storage.GameSet) error {
-	if g.failSaveSet {
-		return errors.New("simulated save set failure")
-	}
-	return g.inner.SaveSet(set)
-}
+func (g *saveFailGames) SaveGame(game *storage.Game) error { return g.inner.SaveGame(game) }
+func (g *saveFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 
 func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
 	store := openPlanTestStore(t)
@@ -921,7 +933,8 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 	})
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
-	r.games = &saveFailGames{inner: store.games, failSaveSet: true}
+	beforeMsgs := len(fb.SentMessages())
+	r.games = &saveFailGames{inner: store.games, failWithinTx: true}
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-save-fail", "game:home:+1"))
 
 	if len(fb.EditedMessages()) != 1 {
@@ -931,7 +944,11 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 	if renderer.liveCount() != 1 || renderer.intermissionCount() != 1 {
 		t.Fatalf("expected no extra overlay renders after save failure, got live=%d intermission=%d", renderer.liveCount(), renderer.intermissionCount())
 	}
-	if len(fb.SentMessages()) != 2 {
-		t.Fatalf("expected no extra broadcast after save failure, got %d sent messages", len(fb.SentMessages()))
+	if len(fb.SentMessages()) != beforeMsgs+1 {
+		t.Fatalf("expected exactly one retry-safe failure message and no broadcast after transactional failure, got %d sent messages", len(fb.SentMessages()))
+	}
+	last := fb.SentMessages()[len(fb.SentMessages())-1]
+	if last.ChatID != chatID || !strings.Contains(last.Text, "state was not changed") {
+		t.Fatalf("expected retry-safe admin failure message, got chat=%d text=%q", last.ChatID, last.Text)
 	}
 }
