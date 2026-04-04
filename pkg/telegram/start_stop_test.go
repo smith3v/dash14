@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,6 +143,35 @@ func TestStartResubscribesExistingUser(t *testing.T) {
 	}
 }
 
+func TestStartRejectsNonPrivateChat(t *testing.T) {
+	store := openTestStore(t)
+	r, fb := newRouterWithStore(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 1010
+	const chatID int64 = -2010
+
+	upd := makeUpdate(userID, chatID, "/start")
+	upd.Message.Chat.Type = models.ChatTypeGroup
+
+	r.handleStart(ctx, nil, upd)
+
+	if _, err := store.users.GetUserByTelegramID(userID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected no user row for non-private /start, got err=%v", err)
+	}
+
+	msgs := fb.SentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected one rejection message, got %d", len(msgs))
+	}
+	if msgs[0].ChatID != chatID {
+		t.Fatalf("expected rejection to group chat %d, got %d", chatID, msgs[0].ChatID)
+	}
+	if !strings.Contains(msgs[0].Text, "private chat") {
+		t.Fatalf("expected private chat guidance, got %q", msgs[0].Text)
+	}
+}
+
 // --- /stop tests ------------------------------------------------------------
 
 // TestStopUnsubscribesUser verifies that /stop marks the user as unsubscribed.
@@ -198,6 +228,43 @@ func TestStopWithoutPriorStartCreatesAndUnsubscribes(t *testing.T) {
 	}
 	if got.DisplayName != "TestUser" {
 		t.Errorf("expected DisplayName=TestUser after /stop, got %q", got.DisplayName)
+	}
+}
+
+func TestStopRejectsNonPrivateChatWithoutChangingSubscription(t *testing.T) {
+	store := openTestStore(t)
+	r, fb := newRouterWithStore(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 1011
+	const privateChatID int64 = 2011
+	const groupChatID int64 = -2011
+
+	r.handleStart(ctx, nil, makeUpdate(userID, privateChatID, "/start"))
+
+	upd := makeUpdate(userID, groupChatID, "/stop")
+	upd.Message.Chat.Type = models.ChatTypeSupergroup
+
+	r.handleStop(ctx, nil, upd)
+
+	got, err := store.users.GetUserByTelegramID(userID)
+	if err != nil {
+		t.Fatalf("GetUserByTelegramID: %v", err)
+	}
+	if !got.Subscribed {
+		t.Fatal("expected group /stop to leave existing subscription unchanged")
+	}
+
+	msgs := fb.SentMessages()
+	if len(msgs) < 2 {
+		t.Fatalf("expected subscription confirmation and rejection message, got %d messages", len(msgs))
+	}
+	last := msgs[len(msgs)-1]
+	if last.ChatID != groupChatID {
+		t.Fatalf("expected rejection to group chat %d, got %d", groupChatID, last.ChatID)
+	}
+	if !strings.Contains(last.Text, "private chat") {
+		t.Fatalf("expected private chat guidance, got %q", last.Text)
 	}
 }
 

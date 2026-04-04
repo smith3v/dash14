@@ -164,7 +164,8 @@ func makeTextUpdate(userID int64, chatID int64, text string) *models.Update {
 				FirstName: "TestUser",
 			},
 			Chat: models.Chat{
-				ID: chatID,
+				ID:   chatID,
+				Type: models.ChatTypePrivate,
 			},
 			Text: text,
 			Entities: []models.MessageEntity{
