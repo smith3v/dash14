@@ -819,11 +819,13 @@ func (b *blockingOverlayRenderer) totalCalls() int {
 
 type saveFailGames struct {
 	inner        *storage.GameRepository
-	failSaveGame bool
-	failSaveSet  bool
+	failWithinTx bool
 }
 
 func (g *saveFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	if g.failWithinTx {
+		return errors.New("simulated transactional failure")
+	}
 	return g.inner.WithinTx(fn)
 }
 func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
@@ -839,19 +841,8 @@ func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
 	return g.inner.ListSetsByGameID(gameID)
 }
-func (g *saveFailGames) SaveGame(game *storage.Game) error {
-	if g.failSaveGame {
-		return errors.New("simulated save game failure")
-	}
-	return g.inner.SaveGame(game)
-}
-
-func (g *saveFailGames) SaveSet(set *storage.GameSet) error {
-	if g.failSaveSet {
-		return errors.New("simulated save set failure")
-	}
-	return g.inner.SaveSet(set)
-}
+func (g *saveFailGames) SaveGame(game *storage.Game) error { return g.inner.SaveGame(game) }
+func (g *saveFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 
 func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
 	store := openPlanTestStore(t)
@@ -936,7 +927,8 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 	})
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
-	r.games = &saveFailGames{inner: store.games, failSaveSet: true}
+	beforeMsgs := len(fb.SentMessages())
+	r.games = &saveFailGames{inner: store.games, failWithinTx: true}
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-save-fail", "game:home:+1"))
 
 	if len(fb.EditedMessages()) != 1 {
@@ -946,7 +938,11 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 	if renderer.liveCount() != 1 || renderer.intermissionCount() != 1 {
 		t.Fatalf("expected no extra overlay renders after save failure, got live=%d intermission=%d", renderer.liveCount(), renderer.intermissionCount())
 	}
-	if len(fb.SentMessages()) != 2 {
-		t.Fatalf("expected no extra broadcast after save failure, got %d sent messages", len(fb.SentMessages()))
+	if len(fb.SentMessages()) != beforeMsgs+1 {
+		t.Fatalf("expected exactly one retry-safe failure message and no broadcast after transactional failure, got %d sent messages", len(fb.SentMessages()))
+	}
+	last := fb.SentMessages()[len(fb.SentMessages())-1]
+	if last.ChatID != chatID || !strings.Contains(last.Text, "state was not changed") {
+		t.Fatalf("expected retry-safe admin failure message, got chat=%d text=%q", last.ChatID, last.Text)
 	}
 }
