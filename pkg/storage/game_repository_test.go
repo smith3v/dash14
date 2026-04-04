@@ -385,12 +385,89 @@ func TestGetNonFinishedGame(t *testing.T) {
 	})
 }
 
-func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
+func TestCreateGameRejectsSecondNonFinishedGame(t *testing.T) {
 	db := openTestDB(t)
 	homeID, guestID := seedTeams(t, db)
 	repo := storage.NewGameRepository(db)
 
+	first := &storage.Game{
+		HomeTeamID:       homeID,
+		GuestTeamID:      guestID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusPlanned,
+		Phase:            storage.GamePhasePlanned,
+		CurrentSetNumber: 1,
+	}
+	if err := repo.CreateGame(first); err != nil {
+		t.Fatalf("CreateGame(first): %v", err)
+	}
+
+	second := &storage.Game{
+		HomeTeamID:       homeID,
+		GuestTeamID:      guestID,
+		HomeTeamSide:     "left",
+		GuestTeamSide:    "right",
+		Status:           storage.GameStatusInProgress,
+		Phase:            storage.GamePhaseSetInProgress,
+		CurrentSetNumber: 1,
+	}
+	err := repo.CreateGame(second)
+	if err == nil {
+		t.Fatal("expected second non-finished game creation to fail, got nil")
+	}
+
+	var count int64
+	if err := db.Model(&storage.Game{}).
+		Where("status <> ?", storage.GameStatusFinished).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count non-finished games: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("non-finished game count = %d, want 1", count)
+	}
+}
+
+func TestWithinTxRollsBackOnError(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	repo := storage.NewGameRepository(db)
+
+	errExpected := errors.New("force rollback")
+	err := repo.WithinTx(func(txRepo *storage.GameRepository) error {
+		game := &storage.Game{
+			HomeTeamID:       homeID,
+			GuestTeamID:      guestID,
+			HomeTeamSide:     "left",
+			GuestTeamSide:    "right",
+			Status:           storage.GameStatusPlanned,
+			Phase:            storage.GamePhasePlanned,
+			CurrentSetNumber: 1,
+		}
+		if err := txRepo.CreateGame(game); err != nil {
+			return err
+		}
+		return errExpected
+	})
+	if !errors.Is(err, errExpected) {
+		t.Fatalf("WithinTx error = %v, want wrapped %v", err, errExpected)
+	}
+
+	var count int64
+	if err := db.Model(&storage.Game{}).Count(&count).Error; err != nil {
+		t.Fatalf("count games after rollback: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("game count after rollback = %d, want 0", count)
+	}
+}
+
+func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
 	t.Run("planned_status_defaults_to_planned_phase", func(t *testing.T) {
+		db := openTestDB(t)
+		homeID, guestID := seedTeams(t, db)
+		repo := storage.NewGameRepository(db)
+
 		game := &storage.Game{
 			HomeTeamID:       homeID,
 			GuestTeamID:      guestID,
@@ -408,6 +485,10 @@ func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
 	})
 
 	t.Run("in_progress_with_active_set_defaults_to_set_in_progress", func(t *testing.T) {
+		db := openTestDB(t)
+		homeID, guestID := seedTeams(t, db)
+		repo := storage.NewGameRepository(db)
+
 		game := &storage.Game{
 			HomeTeamID:       homeID,
 			GuestTeamID:      guestID,
@@ -446,6 +527,10 @@ func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
 	})
 
 	t.Run("in_progress_without_active_set_defaults_to_between_sets", func(t *testing.T) {
+		db := openTestDB(t)
+		homeID, guestID := seedTeams(t, db)
+		repo := storage.NewGameRepository(db)
+
 		game := &storage.Game{
 			HomeTeamID:       homeID,
 			GuestTeamID:      guestID,
@@ -484,6 +569,10 @@ func TestSaveGameInfersPhaseWhenMissing(t *testing.T) {
 	})
 
 	t.Run("finished_status_defaults_to_finished_phase", func(t *testing.T) {
+		db := openTestDB(t)
+		homeID, guestID := seedTeams(t, db)
+		repo := storage.NewGameRepository(db)
+
 		game := &storage.Game{
 			HomeTeamID:       homeID,
 			GuestTeamID:      guestID,

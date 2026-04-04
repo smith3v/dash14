@@ -19,6 +19,17 @@ func NewGameRepository(db *gorm.DB) *GameRepository {
 	return &GameRepository{db: db}
 }
 
+// WithinTx runs fn inside a single database transaction using a repository
+// backed by the transactional DB handle.
+func (r *GameRepository) WithinTx(fn func(repo *GameRepository) error) error {
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(NewGameRepository(tx))
+	}); err != nil {
+		return fmt.Errorf("storage: transaction failed: %w", err)
+	}
+	return nil
+}
+
 // CreateGame inserts a new Game record and populates its ID on success.
 func (r *GameRepository) CreateGame(game *Game) error {
 	if game.Phase == "" {
