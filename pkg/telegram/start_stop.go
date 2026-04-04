@@ -15,6 +15,7 @@ import (
 func (r *Router) handleStart(ctx context.Context, b *bot.Bot, update *models.Update) {
 	userID := senderID(update)
 	chatID := update.Message.Chat.ID
+	chatType := update.Message.Chat.Type
 
 	username := ""
 	displayName := ""
@@ -24,6 +25,14 @@ func (r *Router) handleStart(ctx context.Context, b *bot.Bot, update *models.Upd
 	}
 
 	r.logger.InfoContext(ctx, "received /start", "user_id", userID)
+
+	if chatType != models.ChatTypePrivate {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Subscriptions only work in a private chat with this bot. Open the bot directly and send /start.",
+		})
+		return
+	}
 
 	if err := r.users.UpsertTelegramUser(userID, username, displayName); err != nil {
 		r.logger.ErrorContext(ctx, "handleStart: upsert user failed",
@@ -57,6 +66,7 @@ func (r *Router) handleStart(ctx context.Context, b *bot.Bot, update *models.Upd
 func (r *Router) handleStop(ctx context.Context, b *bot.Bot, update *models.Update) {
 	userID := senderID(update)
 	chatID := update.Message.Chat.ID
+	chatType := update.Message.Chat.Type
 
 	username := ""
 	displayName := ""
@@ -66,6 +76,14 @@ func (r *Router) handleStop(ctx context.Context, b *bot.Bot, update *models.Upda
 	}
 
 	r.logger.InfoContext(ctx, "received /stop", "user_id", userID)
+
+	if chatType != models.ChatTypePrivate {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "Subscriptions only work in a private chat with this bot. Open the bot directly and send /stop.",
+		})
+		return
+	}
 
 	if err := r.users.UpsertTelegramUser(userID, username, displayName); err != nil {
 		r.logger.ErrorContext(ctx, "handleStop: upsert user failed",
