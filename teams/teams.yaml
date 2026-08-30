@@ -69,3 +69,107 @@
   logo: teams/logos/croonenburg-hs-3.png
   aliases:
     - Croonenburg HS 3
+
+- key: albatros-hs-2
+  name: Albatros HS 2
+  short_name: Albatros
+  hometown: Amsterdam
+  logo: teams/logos/albatros.png
+  aliases:
+    - Albatros HS 2
+
+- key: compaen-hs-4
+  name: Compaen HS 4
+  short_name: Compaen
+  hometown: Oostzaan
+  logo: teams/logos/compaen.png
+  aliases:
+    - Compaen HS 4
+
+- key: vcc-92-hs-1
+  name: VCC'92 HS 1
+  short_name: VCC'92
+  hometown: Wormer
+  logo: teams/logos/vcc-92.png
+  aliases:
+    - VCC'92 HS 1
+
+- key: spaarnestad-hs-11
+  name: Spaarnestad HS 11
+  short_name: Spaarnestad
+  hometown: Haarlem
+  logo: teams/logos/spaarnestad-hs-13.png
+  aliases:
+    - Spaarnestad HS 11
+
+- key: spaarnestad-hs-8
+  name: Spaarnestad HS 8
+  short_name: Spaarnestad
+  hometown: Haarlem
+  logo: teams/logos/spaarnestad-hs-13.png
+  aliases:
+    - Spaarnestad HS 8
+
+- key: zaanstad-hs-6
+  name: Zaanstad HS 6
+  short_name: Zaanstad
+  hometown: Koog aan de Zaan
+  logo: teams/logos/zaanstad-hs-8.png
+  aliases:
+    - Zaanstad HS 6
+
+- key: vc-de-where-hs-3
+  name: vc De Where HS 3
+  short_name: vc De Where
+  hometown: Purmerend
+  logo: teams/logos/vc-de-where-hs-6.png
+  aliases:
+    - vc De Where HS 3
+
+- key: vc-de-where-hs-4
+  name: vc De Where HS 4
+  short_name: vc De Where
+  hometown: Purmerend
+  logo: teams/logos/vc-de-where-hs-6.png
+  aliases:
+    - vc De Where HS 4
+
+- key: move-hs-3
+  name: MOVE HS 3
+  short_name: MOVE
+  hometown: Edam
+  logo: teams/logos/move-hs-4.png
+  aliases:
+    - MOVE HS 3
+
+- key: croonenburg-hs-2
+  name: Croonenburg HS 2
+  short_name: Croonenburg
+  hometown: Castricum
+  logo: teams/logos/croonenburg-hs-3.png
+  aliases:
+    - Croonenburg HS 2
+
+- key: the-setfighters-hs-1
+  name: The Setfighters HS 1
+  short_name: The Setfighters
+  hometown: Zaandam
+  logo: teams/logos/the-setfighters.png
+  aliases:
+    - The Setfighters HS 1
+
+- key: vv-jonas-hs-4
+  name: vv Jonas HS 4
+  short_name: vv Jonas
+  hometown: Beverwijk
+  logo: teams/logos/vv-jonas-hs-6.png
+  aliases:
+    - vv Jonas HS 4
+
+- key: vvm-63-hs-1
+  name: VVM'63 HS 1
+  short_name: VVM'63
+  hometown: Monnickendam
+  logo: teams/logos/vvm-63.png
+  aliases:
+    - VVM'63 HS 1
