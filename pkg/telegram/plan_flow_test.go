@@ -105,6 +105,12 @@ func (f *fakeOverlayRenderer) plannedCount() int {
 	return len(f.planned)
 }
 
+func (f *fakeOverlayRenderer) lastPlanned() overlay.PlannedViewModel {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.planned[len(f.planned)-1]
+}
+
 func (f *fakeOverlayRenderer) liveCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -726,6 +732,267 @@ func TestPlanReplacementStartRejectsGameStartedBeforeConfirmation(t *testing.T) 
 	msgs := fb.SentMessages()
 	if !strings.Contains(msgs[len(msgs)-1].Text, "changed") {
 		t.Fatalf("expected changed-game message, got %q", msgs[len(msgs)-1].Text)
+	}
+}
+
+func confirmPlannedGameReplacement(r *Router, userID, chatID int64) {
+	r.handlePlan(context.Background(), nil, makeTextUpdate(userID, chatID, "/plan"))
+	r.handlePlanCallback(
+		context.Background(),
+		nil,
+		makeCallbackUpdate(userID, chatID, "replace-start", "plan:replace:start"),
+	)
+}
+
+func TestPlanReplacementDoesNotPersistBeforeBothTeams(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, _, renderer := newPlanRouter(t, store)
+
+	const userID int64 = 7110
+	const chatID int64 = 8110
+	store.createAdminUser(t, userID, "partial-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	newHome := insertTeam(t, store.teams, "partial-new-home", "Partial New Home", "PNH")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.HomeTeamID != game.HomeTeamID || got.GuestTeamID != game.GuestTeamID {
+		t.Fatalf("game changed before guest selection: got %d vs %d, want %d vs %d", got.HomeTeamID, got.GuestTeamID, game.HomeTeamID, game.GuestTeamID)
+	}
+	if renderer.plannedCount() != 0 || renderer.intermissionCount() != 0 {
+		t.Fatal("expected no overlay render before both replacement teams are selected")
+	}
+	raw, ok := r.plans.Load(userID)
+	if !ok || raw.(*planState).HomeTeam == nil || raw.(*planState).HomeTeam.ID != newHome.ID {
+		t.Fatal("expected replacement home team to remain in wizard state")
+	}
+}
+
+func TestPlanReplacementUpdatesSameGameAndRenders(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+
+	const userID int64 = 7111
+	const chatID int64 = 8111
+	store.createAdminUser(t, userID, "complete-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	game.ControlMessageID = 88
+	if err := store.games.SaveGame(game); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	newHome := insertTeam(t, store.teams, "complete-new-home", "Complete New Home", "CNH")
+	newGuest := insertTeam(t, store.teams, "complete-new-guest", "Complete New Guest", "CNG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newGuest.Name))
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.ID != game.ID {
+		t.Fatalf("replacement ID: got %d, want %d", got.ID, game.ID)
+	}
+	if got.HomeTeamID != newHome.ID || got.GuestTeamID != newGuest.ID {
+		t.Fatalf("replacement teams: got %d vs %d, want %d vs %d", got.HomeTeamID, got.GuestTeamID, newHome.ID, newGuest.ID)
+	}
+	if got.ControlMessageID != 0 || got.CurrentAdminUserID != userID {
+		t.Fatalf("replacement control metadata: admin=%d message=%d", got.CurrentAdminUserID, got.ControlMessageID)
+	}
+	if renderer.plannedCount() != 1 || renderer.intermissionCount() != 1 {
+		t.Fatalf("render counts: planned=%d intermission=%d, want 1/1", renderer.plannedCount(), renderer.intermissionCount())
+	}
+	planned := renderer.lastPlanned()
+	if planned.HomeTeamName != newHome.Name || planned.GuestTeamName != newGuest.Name {
+		t.Fatalf("planned overlay teams: %#v", planned)
+	}
+	intermission := renderer.lastIntermission()
+	if intermission.HomeTeamName != newHome.Name || intermission.GuestTeamName != newGuest.Name {
+		t.Fatalf("intermission overlay teams: %#v", intermission)
+	}
+	if _, ok := r.plans.Load(userID); ok {
+		t.Fatal("expected completed replacement state to be cleared")
+	}
+	msgs := fb.SentMessages()
+	if !strings.Contains(msgs[len(msgs)-1].Text, "Planned game updated") {
+		t.Fatalf("expected update confirmation, got %q", msgs[len(msgs)-1].Text)
+	}
+}
+
+func TestPlanReplacementRejectsGameStartedDuringWizard(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+
+	const userID int64 = 7112
+	const chatID int64 = 8112
+	store.createAdminUser(t, userID, "started-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	newHome := insertTeam(t, store.teams, "started-new-home", "Started New Home", "SNH")
+	newGuest := insertTeam(t, store.teams, "started-new-guest", "Started New Guest", "SNG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	game.Status = storage.GameStatusInProgress
+	game.Phase = storage.GamePhaseBetweenSets
+	if err := store.games.SaveGame(game); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newGuest.Name))
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.Status != storage.GameStatusInProgress || got.HomeTeamID != game.HomeTeamID || got.GuestTeamID != game.GuestTeamID {
+		t.Fatalf("started game was replaced: status=%q teams=%d/%d", got.Status, got.HomeTeamID, got.GuestTeamID)
+	}
+	if renderer.plannedCount() != 0 || renderer.intermissionCount() != 0 {
+		t.Fatal("expected no replacement overlay after game started")
+	}
+	if _, ok := r.plans.Load(userID); ok {
+		t.Fatal("expected conflicting replacement state to be cleared")
+	}
+	msgs := fb.SentMessages()
+	if !strings.Contains(msgs[len(msgs)-1].Text, "changed") {
+		t.Fatalf("expected changed-game message, got %q", msgs[len(msgs)-1].Text)
+	}
+}
+
+func TestPlanReplacementRejectsConcurrentReplacement(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, _, renderer := newPlanRouter(t, store)
+
+	const userID int64 = 7113
+	const chatID int64 = 8113
+	store.createAdminUser(t, userID, "concurrent-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	newHome := insertTeam(t, store.teams, "concurrent-new-home", "Concurrent New Home", "CNH")
+	newGuest := insertTeam(t, store.teams, "concurrent-new-guest", "Concurrent New Guest", "CNG")
+	winnerHome := insertTeam(t, store.teams, "winner-home", "Winner Home", "WH")
+	winnerGuest := insertTeam(t, store.teams, "winner-guest", "Winner Guest", "WG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	if err := store.games.ReplacePlannedGame(
+		game.ID,
+		game.HomeTeamID,
+		game.GuestTeamID,
+		winnerHome.ID,
+		winnerGuest.ID,
+		999,
+	); err != nil {
+		t.Fatalf("concurrent ReplacePlannedGame: %v", err)
+	}
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newGuest.Name))
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.HomeTeamID != winnerHome.ID || got.GuestTeamID != winnerGuest.ID || got.CurrentAdminUserID != 999 {
+		t.Fatalf("stale wizard overwrote concurrent replacement: teams=%d/%d admin=%d", got.HomeTeamID, got.GuestTeamID, got.CurrentAdminUserID)
+	}
+	if renderer.plannedCount() != 0 || renderer.intermissionCount() != 0 {
+		t.Fatal("expected no overlay render for stale replacement")
+	}
+}
+
+func TestPlanReplacementCallbackCannotApplyTwice(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, _, renderer := newPlanRouter(t, store)
+
+	const userID int64 = 7114
+	const chatID int64 = 8114
+	store.createAdminUser(t, userID, "repeated-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	newHome := insertTeam(t, store.teams, "repeated-new-home", "Repeated New Home", "RNH")
+	newGuest := insertTeam(t, store.teams, "repeated-new-guest", "Repeated New Guest", "RNG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	guestCallback := makeCallbackUpdate(userID, chatID, "guest-repeat", fmt.Sprintf("plan:guest:%d", newGuest.ID))
+	r.handlePlanCallback(context.Background(), nil, guestCallback)
+	r.handlePlanCallback(context.Background(), nil, guestCallback)
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.HomeTeamID != newHome.ID || got.GuestTeamID != newGuest.ID {
+		t.Fatalf("replacement teams: got %d/%d, want %d/%d", got.HomeTeamID, got.GuestTeamID, newHome.ID, newGuest.ID)
+	}
+	if renderer.plannedCount() != 1 || renderer.intermissionCount() != 1 {
+		t.Fatalf("repeated callback rendered more than once: planned=%d intermission=%d", renderer.plannedCount(), renderer.intermissionCount())
+	}
+}
+
+func TestPlanReplacementDisablesPreviousControlMessage(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+
+	const userID int64 = 7115
+	const chatID int64 = 8115
+	store.createAdminUser(t, userID, "control-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	game.ControlMessageID = 91
+	if err := store.games.SaveGame(game); err != nil {
+		t.Fatalf("SaveGame: %v", err)
+	}
+	newHome := insertTeam(t, store.teams, "control-new-home", "Control New Home", "CNH")
+	newGuest := insertTeam(t, store.teams, "control-new-guest", "Control New Guest", "CNG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newGuest.Name))
+
+	edited := fb.EditedMessages()
+	if len(edited) != 1 {
+		t.Fatalf("expected one old-control edit, got %d", len(edited))
+	}
+	if edited[0].MessageID != 91 || !strings.Contains(edited[0].Text, "replaced") {
+		t.Fatalf("unexpected old-control edit: %#v", edited[0])
+	}
+	kb, ok := edited[0].ReplyMarkup.(*models.InlineKeyboardMarkup)
+	if !ok || len(kb.InlineKeyboard) != 0 {
+		t.Fatalf("expected empty old-control keyboard, got %#v", edited[0].ReplyMarkup)
+	}
+}
+
+func TestPlanReplacementTransactionalFailurePreservesCurrentGame(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, fb, renderer := newPlanRouter(t, store)
+	r.games = &txFailGames{inner: store.games, failWithinTx: true}
+
+	const userID int64 = 7116
+	const chatID int64 = 8116
+	store.createAdminUser(t, userID, "failed-replacement")
+	game := createCurrentPlannedGame(t, store, userID)
+	newHome := insertTeam(t, store.teams, "failed-new-home", "Failed New Home", "FNH")
+	newGuest := insertTeam(t, store.teams, "failed-new-guest", "Failed New Guest", "FNG")
+
+	confirmPlannedGameReplacement(r, userID, chatID)
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newGuest.Name))
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.HomeTeamID != game.HomeTeamID || got.GuestTeamID != game.GuestTeamID {
+		t.Fatalf("game changed after transaction failure: got %d/%d, want %d/%d", got.HomeTeamID, got.GuestTeamID, game.HomeTeamID, game.GuestTeamID)
+	}
+	if renderer.plannedCount() != 0 || renderer.intermissionCount() != 0 {
+		t.Fatal("expected no overlay render after transaction failure")
+	}
+	msgs := fb.SentMessages()
+	if !strings.Contains(msgs[len(msgs)-1].Text, "state was not changed") {
+		t.Fatalf("expected retry-safe failure message, got %q", msgs[len(msgs)-1].Text)
 	}
 }
 

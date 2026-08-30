@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -495,14 +496,31 @@ func (r *Router) finalizePlannedGame(
 		Phase:              storage.GamePhasePlanned,
 		CurrentAdminUserID: userID,
 	}
+	isReplacement := state.Replacement != nil
+	if isReplacement {
+		game.ID = state.Replacement.GameID
+	}
 
 	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+		if isReplacement {
+			return repo.ReplacePlannedGame(
+				state.Replacement.GameID,
+				state.Replacement.ExpectedHomeTeamID,
+				state.Replacement.ExpectedGuestTeamID,
+				state.HomeTeam.ID,
+				guestTeam.ID,
+				userID,
+			)
+		}
 		return repo.CreateGame(game)
 	}); err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: transactional create failed",
-			"user_id", userID, "err", err)
+		r.logger.ErrorContext(ctx, "finalizePlannedGame: transactional write failed",
+			"user_id", userID, "game_id", game.ID, "is_replacement", isReplacement, "err", err)
 		text := "Planning failed. Match state was not changed. Please try again."
-		if isSingleActiveGameConstraintError(err) {
+		if isReplacement && errors.Is(err, storage.ErrPlannedGameChanged) {
+			r.plans.Delete(userID)
+			text = "The planned game changed and was not replaced. Please run /plan again."
+		} else if !isReplacement && isSingleActiveGameConstraintError(err) {
 			text = "Cannot run /plan: another game is still planned or in progress."
 		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
@@ -510,6 +528,29 @@ func (r *Router) finalizePlannedGame(
 			Text:   text,
 		})
 		return
+	}
+
+	// Consume the completed wizard before external side effects so repeated
+	// callbacks cannot apply or render the same replacement twice.
+	r.plans.Delete(userID)
+
+	if isReplacement && state.Replacement.PreviousControlMessageID != 0 {
+		_, err := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: state.Replacement.PreviousControlMessageID,
+			Text:      "This planned game was replaced. Run /game for current controls.",
+			ReplyMarkup: &models.InlineKeyboardMarkup{
+				InlineKeyboard: [][]models.InlineKeyboardButton{},
+			},
+		})
+		if err != nil {
+			r.logger.ErrorContext(ctx, "finalizePlannedGame: disable previous control message failed",
+				"user_id", userID,
+				"game_id", game.ID,
+				"message_id", state.Replacement.PreviousControlMessageID,
+				"err", err,
+			)
+		}
 	}
 
 	vm := overlay.PlannedViewModel{
@@ -557,11 +598,15 @@ func (r *Router) finalizePlannedGame(
 		return
 	}
 
-	r.plans.Delete(userID)
+	result := "created"
+	if isReplacement {
+		result = "updated"
+	}
 	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text: fmt.Sprintf(
-			"Planned game created: %s vs %s.",
+			"Planned game %s: %s vs %s.",
+			result,
 			state.HomeTeam.Name,
 			guestTeam.Name,
 		),
