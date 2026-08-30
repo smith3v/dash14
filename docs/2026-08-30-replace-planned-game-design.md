@@ -2,105 +2,171 @@
 
 ## Goal
 
-Let an administrator replace a planned, not-yet-started game while using the
-existing `/plan` wizard. After selecting both new teams, the bot asks for
-explicit confirmation instead of replying that another game is planned. A game
-that has already started remains non-replaceable and must be completed through
-the normal score controls.
+Let an administrator replace a planned, not-yet-started game through the
+existing `/plan` wizard. The bot checks the current game immediately after the
+command. It stops when a game is in progress and asks for confirmation before
+starting team selection when a game is merely planned.
+
+The current planned game remains authoritative and unchanged while the admin
+selects replacement teams. It is updated atomically only after both new teams
+have been chosen. A game that has started cannot be replaced and must be
+completed through the normal score controls.
 
 ## User flow
 
-The `/plan` flow remains unchanged until the guest team has been selected. The
-bot then reads the current game.
+After the existing admin check, `/plan` reads the current game before creating
+a plan state or requesting a team name.
 
-- When no game exists, it creates the new planned game exactly as it does now.
-- When the current game is `planned`, it retains the selected home and guest
-  teams in the admin's plan state and sends this confirmation message:
+### No current game
 
-  ```text
-  A game is already planned: Croonenburg HS 3 vs Kroefi HS 1.
-  Replace it with Spaarnestad HS 11 vs Albatros?
-  ```
+The bot starts the existing flow without extra confirmation:
 
-  The inline keyboard contains `Yes, replace` and `No, keep current game`.
-- `No` discards the in-progress `/plan` state and confirms that the current
-  game was kept. It does not modify the overlay or game-control message.
-- `Yes` replaces the game and replies `Planned game created: …`. The normal
-  planned and intermission overlays are rendered for the new teams.
-- When the current game is in progress, the bot replies that it cannot be
-  replaced because it has already started. It discards the new plan; no
-  existing state is changed.
+```text
+Please enter the home team name:
+```
 
-The wording shown to users should follow the bot's existing English interface
-unless interface localisation is introduced separately.
+After the home and guest teams are selected, the bot creates the planned game
+as it does today.
 
-## State and callback design
+### Game in progress
 
-Extend `planState` with the chosen guest team and a `waitingForReplacement`
-flag. New callback data is scoped to the existing plan namespace:
+The bot does not start a plan state and replies:
 
-- `plan:replace:yes`
-- `plan:replace:no`
+```text
+A game is currently in progress: Croonenburg HS 3 vs Kroefi HS 1.
+Finish this game before planning another one.
+```
 
-Only the administrator who owns that plan state may use the confirmation. A
-callback with no corresponding state is ignored after its Telegram loading
-indicator is acknowledged. Starting a fresh `/plan` replaces any earlier
-pending state, as it does today.
+No team prompts follow, and all game and overlay state remains unchanged.
 
-At confirmation time, the handler must re-read the current game. This makes
-the confirmation safe if another administrator starts the game, takes over, or
-replaces it between the prompt and the button click.
+### Game planned
+
+The bot stores a pending confirmation state and replies:
+
+```text
+A game is already planned: Croonenburg HS 3 vs Kroefi HS 1.
+Would you like to plan another game instead?
+```
+
+The inline keyboard has two explicit buttons:
+
+- `Yes, plan another`
+- `No, keep current`
+
+`No, keep current` clears the pending plan state and confirms that the current
+game was kept. `Yes, plan another` verifies that the same game is still
+planned, then continues with the existing home-team and guest-team selection
+flow. There is no second replacement confirmation after team selection.
+
+When both replacement teams have been chosen, the bot atomically updates the
+planned game, renders the normal planned and intermission overlays for the new
+teams, and replies:
+
+```text
+Planned game updated: Spaarnestad HS 11 vs Albatros.
+```
+
+The wording should follow the bot's existing English interface unless
+localisation is introduced separately.
+
+## Plan state and callbacks
+
+Extend `planState` to distinguish a normal new plan from a replacement. A
+replacement state records:
+
+- whether it is waiting for the initial confirmation;
+- the existing game's ID;
+- the existing home and guest team IDs;
+- the selected replacement home team, once chosen.
+
+The original team IDs form an optimistic-concurrency fingerprint. They prevent
+an older wizard from overwriting a replacement completed by another admin.
+
+New callback data remains in the existing plan namespace:
+
+- `plan:replace:start`
+- `plan:replace:keep`
+
+Only the admin who owns the in-memory plan state can act on its confirmation.
+The handler acknowledges and ignores callbacks for missing or superseded state.
+Starting `/plan` again replaces that admin's earlier pending plan state.
+
+Before handling `plan:replace:start`, the bot re-reads the current game. If the
+expected game is still planned, it clears the confirmation flag and prompts for
+the home team. If that game has started, disappeared, or already been replaced,
+the bot clears the state, leaves persistence untouched, and asks the admin to
+run `/plan` again when appropriate.
 
 ## Persistence and consistency
 
-Replacement is one database transaction:
+A normal plan continues to create a new game only after both teams are chosen.
+A replacement performs one guarded database update after both teams are chosen.
+The update matches all of the following:
 
-1. Load the current non-finished game.
-2. If it is still `planned`, delete that game record.
-3. Create the new planned game.
+- the stored game ID;
+- `status = planned`;
+- the original home team ID;
+- the original guest team ID.
 
-The deletion is conditional on the old game's ID and `planned` status. A
-planned game has no sets, so it can be removed without deleting scored match
-data. This avoids inserting a fictional 0–0 finished match into the history.
-If the game has changed to `in_progress`, the transaction aborts and preserves
-both the game and the pending replacement request only long enough to report
-the conflict; the new game is not created.
+It sets both new team IDs together, restores the normal left/right side
+assignment, keeps the lifecycle in the planned phase, assigns control to the
+admin completing the replacement, and clears the old control-message ID. The
+planned-game invariants remain set to their initial values: set number 1, zero
+sets won, and no fifth-set side switch.
 
-The repository should expose a focused operation for deleting a planned game,
-rather than a general unguarded delete. No schema migration is needed: the
-existing unique index continues to guarantee that exactly one non-finished game
-exists.
+The repository should expose a focused operation such as
+`ReplacePlannedGame`, returning a conflict result when the guarded update
+affects no row. A single SQL update is atomic; it may also run inside the
+existing transaction boundary for consistency with game creation. No game row
+is deleted, no fictional finished match is created, and no schema migration is
+required.
+
+If the current game starts while replacement teams are being selected, its
+status no longer matches `planned`, so the update changes nothing. If another
+admin replaces it first, the original team IDs no longer match. In either case,
+the bot reports that the planned game changed and preserves the current game.
 
 ## Control-panel safety
 
-The previous `/game` control message is stale once its planned game is
-replaced. Game callbacks must require an exact match between the callback's
-message ID and the current game's `ControlMessageID`; a zero control-message
-ID is never valid for a callback. This prevents an old `Start the game` button
-from starting the replacement game. When practical, the old control message
-should also be edited to remove its inline keyboard and state that the game was
-replaced; correctness must not depend on that best-effort Telegram edit.
+The previous `/game` message becomes stale after the planned game's teams are
+updated. The replacement update clears `ControlMessageID`. Game callbacks must
+require an exact non-zero match between the callback message ID and the current
+game's `ControlMessageID`. This prevents the old `Start the game` button from
+starting the updated game.
+
+The bot should also make a best-effort Telegram edit to remove the old inline
+keyboard and state that the planned game was replaced. Correctness must depend
+on the persisted message-ID check, not on the edit succeeding.
 
 ## Error handling
 
-Database failures leave the old game intact because deletion and creation share
-one transaction. The bot reports that replacement failed and asks the admin to
-try again. Overlay rendering remains after the committed transaction, matching
-the current planning flow: if rendering fails, the new game remains planned and
-the bot reports that the overlay needs attention.
+If the initial current-game lookup fails, `/plan` reports a generic error and
+does not start a plan state. A failed or conflicting replacement leaves the
+old planned game unchanged because the guarded update is atomic.
+
+Overlay rendering happens only after persistence succeeds, matching the
+existing planning flow. If rendering fails, the updated game remains planned
+and the bot reports that the overlay needs attention. The plan state is cleared
+after a successful persistence update so repeated confirmation or team
+callbacks cannot apply the replacement again.
 
 ## Verification
 
-Add table-driven Telegram handler tests for:
+Add Telegram handler tests for:
 
-- a normal plan with no current game;
-- planned game → prompt includes both old and new team names;
-- `No` keeps the original game and produces no new game or overlay render;
-- `Yes` removes the old planned game, creates the new one, and renders it;
-- a current in-progress game cannot be replaced;
-- a game that becomes in-progress before confirmation is not replaced;
-- stale or repeated confirmation callbacks do not alter game state;
-- callbacks from the old `/game` control message cannot start the replacement.
+- `/plan` with no current game immediately requests the home team;
+- `/plan` with an in-progress game identifies it and starts no wizard;
+- `/plan` with a planned game identifies it and displays both buttons;
+- `No, keep current` clears the wizard and changes no state or overlay;
+- `Yes, plan another` continues into the unchanged team-selection flow;
+- both replacement teams are selected before any persisted value changes;
+- choosing both teams atomically updates the same planned game row and renders
+  the new overlays;
+- a game started before confirmation or during team selection is not replaced;
+- a concurrent replacement makes an older wizard fail without overwriting it;
+- stale or repeated plan callbacks do not alter game state;
+- callbacks from the previous `/game` message cannot start the updated game.
 
-Add repository tests for the conditional planned-game deletion and transaction
-rollback. Run `go test ./...` after implementation.
+Add repository tests for a successful guarded update, mismatched IDs,
+non-planned status, and rollback or no-change behavior on failure. Run
+`go test ./...` after implementation.
