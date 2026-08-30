@@ -26,7 +26,10 @@ type plannedGameReplacement struct {
 	GameID                   uint
 	ExpectedHomeTeamID       uint
 	ExpectedGuestTeamID      uint
+	PreviousAdminUserID      int64
 	PreviousControlMessageID int
+	ConfirmationChatID       int64
+	ConfirmationMessageID    int
 	AwaitingConfirmation     bool
 }
 
@@ -117,11 +120,12 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 			GameID:                   current.ID,
 			ExpectedHomeTeamID:       current.HomeTeamID,
 			ExpectedGuestTeamID:      current.GuestTeamID,
+			PreviousAdminUserID:      current.CurrentAdminUserID,
 			PreviousControlMessageID: current.ControlMessageID,
+			ConfirmationChatID:       chatID,
 			AwaitingConfirmation:     true,
 		}}
-		r.plans.Store(userID, state)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+		msg, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: fmt.Sprintf(
 				"A game is already planned: %s vs %s.\nWould you like to plan another game instead?",
@@ -133,6 +137,13 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 				{Text: "No, keep current", CallbackData: "plan:replace:keep"},
 			}}},
 		})
+		if err != nil || msg == nil {
+			r.logger.ErrorContext(ctx, "handlePlan: send replacement confirmation failed",
+				"user_id", userID, "game_id", current.ID, "err", err)
+			return
+		}
+		state.Replacement.ConfirmationMessageID = msg.ID
+		r.plans.Store(userID, state)
 
 	default:
 		r.logger.ErrorContext(ctx, "handlePlan: unsupported current game status",
@@ -299,7 +310,7 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 
 	switch {
 	case data == "plan:replace:keep":
-		if state.Replacement == nil || !state.Replacement.AwaitingConfirmation {
+		if !matchesReplacementConfirmation(state.Replacement, chatID, update.CallbackQuery.Message.Message.ID) {
 			return
 		}
 		r.plans.Delete(userID)
@@ -309,7 +320,7 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		})
 
 	case data == "plan:replace:start":
-		if state.Replacement == nil || !state.Replacement.AwaitingConfirmation {
+		if !matchesReplacementConfirmation(state.Replacement, chatID, update.CallbackQuery.Message.Message.ID) {
 			return
 		}
 		current, err := r.games.GetCurrentGame()
@@ -388,6 +399,14 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		}
 		r.finalizePlannedGame(ctx, userID, chatID, state, team)
 	}
+}
+
+func matchesReplacementConfirmation(replacement *plannedGameReplacement, chatID int64, messageID int) bool {
+	return replacement != nil &&
+		replacement.AwaitingConfirmation &&
+		replacement.ConfirmationChatID == chatID &&
+		replacement.ConfirmationMessageID != 0 &&
+		replacement.ConfirmationMessageID == messageID
 }
 
 func matchesPlannedGameReplacement(game *storage.Game, replacement *plannedGameReplacement) bool {
@@ -534,7 +553,10 @@ func (r *Router) finalizePlannedGame(
 	// callbacks cannot apply or render the same replacement twice.
 	r.plans.Delete(userID)
 
-	if isReplacement && state.Replacement.PreviousControlMessageID != 0 {
+	if isReplacement &&
+		state.Replacement.PreviousControlMessageID != 0 &&
+		state.Replacement.PreviousAdminUserID == userID &&
+		chatID == userID {
 		_, err := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: state.Replacement.PreviousControlMessageID,
