@@ -170,3 +170,9 @@ Add Telegram handler tests for:
 Add repository tests for a successful guarded update, mismatched IDs,
 non-planned status, and rollback or no-change behavior on failure. Run
 `go test ./...` after implementation.
+
+## Implementation plan
+
+The file-by-file implementation sequence, focused tests, commits, and final
+branch review are defined in
+`docs/2026-08-30-replace-planned-game-implementation.md`.
