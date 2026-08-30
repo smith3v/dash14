@@ -252,6 +252,60 @@ func TestGameControlReplacesOldControlThread(t *testing.T) {
 	}
 }
 
+func TestGameControlRejectsCallbackWhenControlMessageWasInvalidated(t *testing.T) {
+	store := openPlanTestStore(t)
+	r, _, renderer := newPlanRouter(t, store)
+	ctx := context.Background()
+
+	const userID int64 = 7208
+	const chatID int64 = 8208
+	store.createAdminUser(t, userID, "invalidated-control")
+	game := createCurrentPlannedGame(t, store, userID)
+
+	r.handleGame(ctx, nil, makeGameMessageUpdate(userID, chatID, "/game"))
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after /game: %v", err)
+	}
+	oldControlMessageID := current.ControlMessageID
+	if oldControlMessageID == 0 {
+		t.Fatal("expected /game to persist a control message ID")
+	}
+
+	newHome := insertTeam(t, store.teams, "invalidated-home", "Invalidated Home", "IH")
+	newGuest := insertTeam(t, store.teams, "invalidated-guest", "Invalidated Guest", "IG")
+	if err := store.games.ReplacePlannedGame(
+		current.ID,
+		current.HomeTeamID,
+		current.GuestTeamID,
+		newHome.ID,
+		newGuest.ID,
+		userID,
+	); err != nil {
+		t.Fatalf("ReplacePlannedGame: %v", err)
+	}
+
+	r.handleGameCallback(
+		ctx,
+		nil,
+		makeGameCallbackUpdate(userID, chatID, oldControlMessageID, "old-start", "game:start"),
+	)
+
+	got, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID after stale callback: %v", err)
+	}
+	if got.Status != storage.GameStatusPlanned || got.Phase != storage.GamePhasePlanned {
+		t.Fatalf("invalidated callback changed lifecycle to %q/%q", got.Status, got.Phase)
+	}
+	if _, err := store.games.GetActiveSet(game.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("GetActiveSet error = %v, want gorm.ErrRecordNotFound", err)
+	}
+	if renderer.liveCount() != 0 {
+		t.Fatalf("invalidated callback rendered live overlay %d times", renderer.liveCount())
+	}
+}
+
 func TestGameControlRejectsNonOwner(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
@@ -847,7 +901,7 @@ func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
 	return g.inner.ListSetsByGameID(gameID)
 }
-func (g *saveFailGames) SaveGame(game *storage.Game) error { return g.inner.SaveGame(game) }
+func (g *saveFailGames) SaveGame(game *storage.Game) error  { return g.inner.SaveGame(game) }
 func (g *saveFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 
 func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
