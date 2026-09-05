@@ -12,18 +12,17 @@ import (
 // These are used as the HomeTeamID and GuestTeamID for test games.
 func seedTeams(t *testing.T, db *gorm.DB) (homeID, guestID uint) {
 	t.Helper()
-	repo := storage.NewTeamRepository(db)
+	return seedTeam(t, db, "home-team", "Home FC", "HOM"),
+		seedTeam(t, db, "guest-team", "Guest FC", "GST")
+}
 
-	home := &storage.Team{Key: "home-team", Name: "Home FC", ShortName: "HOM"}
-	guest := &storage.Team{Key: "guest-team", Name: "Guest FC", ShortName: "GST"}
-
-	if err := repo.UpsertTeam(home); err != nil {
-		t.Fatalf("seedTeams: upsert home team: %v", err)
+func seedTeam(t *testing.T, db *gorm.DB, key, name, shortName string) uint {
+	t.Helper()
+	team := &storage.Team{Key: key, Name: name, ShortName: shortName}
+	if err := storage.NewTeamRepository(db).UpsertTeam(team); err != nil {
+		t.Fatalf("seedTeam %q: %v", key, err)
 	}
-	if err := repo.UpsertTeam(guest); err != nil {
-		t.Fatalf("seedTeams: upsert guest team: %v", err)
-	}
-	return home.ID, guest.ID
+	return team.ID
 }
 
 // TestGameCreateAndGetByID verifies that CreateGame persists a new planned game
@@ -141,6 +140,232 @@ func TestGameSaveUpdatesFields(t *testing.T) {
 	}
 	if got.HomeSetsWon != 1 {
 		t.Errorf("HomeSetsWon: got %d, want 1", got.HomeSetsWon)
+	}
+}
+
+func TestReplacePlannedGameUpdatesExpectedRow(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	newHomeID := seedTeam(t, db, "new-home", "New Home", "NH")
+	newGuestID := seedTeam(t, db, "new-guest", "New Guest", "NG")
+	repo := storage.NewGameRepository(db)
+
+	game := &storage.Game{
+		HomeTeamID:         homeID,
+		GuestTeamID:        guestID,
+		HomeTeamSide:       "right",
+		GuestTeamSide:      "left",
+		HomeSetsWon:        2,
+		GuestSetsWon:       1,
+		CurrentSetNumber:   5,
+		Status:             storage.GameStatusPlanned,
+		Phase:              storage.GamePhasePlanned,
+		CurrentAdminUserID: 11,
+		ControlMessageID:   99,
+		SideSwitchedInSet5: true,
+	}
+	if err := repo.CreateGame(game); err != nil {
+		t.Fatalf("CreateGame: %v", err)
+	}
+
+	if err := repo.ReplacePlannedGame(
+		game.ID,
+		homeID,
+		guestID,
+		newHomeID,
+		newGuestID,
+		42,
+	); err != nil {
+		t.Fatalf("ReplacePlannedGame: %v", err)
+	}
+
+	got, err := repo.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.ID != game.ID {
+		t.Fatalf("ID: got %d, want %d", got.ID, game.ID)
+	}
+	if got.HomeTeamID != newHomeID || got.GuestTeamID != newGuestID {
+		t.Fatalf("teams: got %d vs %d, want %d vs %d", got.HomeTeamID, got.GuestTeamID, newHomeID, newGuestID)
+	}
+	if got.HomeTeamSide != "left" || got.GuestTeamSide != "right" {
+		t.Fatalf("sides: got %q/%q, want left/right", got.HomeTeamSide, got.GuestTeamSide)
+	}
+	if got.HomeSetsWon != 0 || got.GuestSetsWon != 0 {
+		t.Fatalf("sets won: got %d-%d, want 0-0", got.HomeSetsWon, got.GuestSetsWon)
+	}
+	if got.CurrentSetNumber != 1 {
+		t.Fatalf("CurrentSetNumber: got %d, want 1", got.CurrentSetNumber)
+	}
+	if got.Status != storage.GameStatusPlanned || got.Phase != storage.GamePhasePlanned {
+		t.Fatalf("lifecycle: got %q/%q, want planned/planned", got.Status, got.Phase)
+	}
+	if got.CurrentAdminUserID != 42 {
+		t.Fatalf("CurrentAdminUserID: got %d, want 42", got.CurrentAdminUserID)
+	}
+	if got.ControlMessageID != 0 {
+		t.Fatalf("ControlMessageID: got %d, want 0", got.ControlMessageID)
+	}
+	if got.SideSwitchedInSet5 {
+		t.Fatal("SideSwitchedInSet5: got true, want false")
+	}
+
+	var count int64
+	if err := db.Model(&storage.Game{}).Count(&count).Error; err != nil {
+		t.Fatalf("count games: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("game count: got %d, want 1", count)
+	}
+}
+
+func TestReplacePlannedGameRejectsChangedGame(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(t *testing.T, repo *storage.GameRepository, game *storage.Game)
+		callID  func(gameID uint) uint
+		homeID  func(homeID, guestID uint) uint
+		guestID func(homeID, guestID uint) uint
+	}{
+		{
+			name: "started game",
+			mutate: func(t *testing.T, repo *storage.GameRepository, game *storage.Game) {
+				t.Helper()
+				game.Status = storage.GameStatusInProgress
+				game.Phase = storage.GamePhaseBetweenSets
+				if err := repo.SaveGame(game); err != nil {
+					t.Fatalf("SaveGame: %v", err)
+				}
+			},
+		},
+		{
+			name:   "wrong expected home",
+			homeID: func(_, guestID uint) uint { return guestID },
+		},
+		{
+			name:    "wrong expected guest",
+			guestID: func(homeID, _ uint) uint { return homeID },
+		},
+		{
+			name:   "wrong game id",
+			callID: func(gameID uint) uint { return gameID + 100 },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDB(t)
+			homeID, guestID := seedTeams(t, db)
+			newHomeID := seedTeam(t, db, "new-home", "New Home", "NH")
+			newGuestID := seedTeam(t, db, "new-guest", "New Guest", "NG")
+			repo := storage.NewGameRepository(db)
+
+			game := &storage.Game{
+				HomeTeamID:         homeID,
+				GuestTeamID:        guestID,
+				HomeTeamSide:       "left",
+				GuestTeamSide:      "right",
+				CurrentSetNumber:   1,
+				Status:             storage.GameStatusPlanned,
+				Phase:              storage.GamePhasePlanned,
+				CurrentAdminUserID: 7,
+				ControlMessageID:   55,
+			}
+			if err := repo.CreateGame(game); err != nil {
+				t.Fatalf("CreateGame: %v", err)
+			}
+			if tc.mutate != nil {
+				tc.mutate(t, repo, game)
+			}
+
+			callID := game.ID
+			if tc.callID != nil {
+				callID = tc.callID(game.ID)
+			}
+			expectedHomeID := homeID
+			if tc.homeID != nil {
+				expectedHomeID = tc.homeID(homeID, guestID)
+			}
+			expectedGuestID := guestID
+			if tc.guestID != nil {
+				expectedGuestID = tc.guestID(homeID, guestID)
+			}
+
+			err := repo.ReplacePlannedGame(
+				callID,
+				expectedHomeID,
+				expectedGuestID,
+				newHomeID,
+				newGuestID,
+				42,
+			)
+			if !errors.Is(err, storage.ErrPlannedGameChanged) {
+				t.Fatalf("ReplacePlannedGame error = %v, want ErrPlannedGameChanged", err)
+			}
+
+			got, getErr := repo.GetGameByID(game.ID)
+			if getErr != nil {
+				t.Fatalf("GetGameByID: %v", getErr)
+			}
+			if got.HomeTeamID != homeID || got.GuestTeamID != guestID {
+				t.Fatalf("teams changed after conflict: got %d vs %d, want %d vs %d", got.HomeTeamID, got.GuestTeamID, homeID, guestID)
+			}
+			if got.CurrentAdminUserID != 7 || got.ControlMessageID != 55 {
+				t.Fatalf("control metadata changed after conflict: admin=%d message=%d", got.CurrentAdminUserID, got.ControlMessageID)
+			}
+		})
+	}
+}
+
+func TestReplacePlannedGameRollsBackWithTransaction(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	newHomeID := seedTeam(t, db, "new-home", "New Home", "NH")
+	newGuestID := seedTeam(t, db, "new-guest", "New Guest", "NG")
+	repo := storage.NewGameRepository(db)
+	game := &storage.Game{
+		HomeTeamID:         homeID,
+		GuestTeamID:        guestID,
+		HomeTeamSide:       "left",
+		GuestTeamSide:      "right",
+		CurrentSetNumber:   1,
+		Status:             storage.GameStatusPlanned,
+		Phase:              storage.GamePhasePlanned,
+		CurrentAdminUserID: 7,
+		ControlMessageID:   55,
+	}
+	if err := repo.CreateGame(game); err != nil {
+		t.Fatalf("CreateGame: %v", err)
+	}
+
+	errRollback := errors.New("force replacement rollback")
+	err := repo.WithinTx(func(txRepo *storage.GameRepository) error {
+		if err := txRepo.ReplacePlannedGame(
+			game.ID,
+			homeID,
+			guestID,
+			newHomeID,
+			newGuestID,
+			42,
+		); err != nil {
+			return err
+		}
+		return errRollback
+	})
+	if !errors.Is(err, errRollback) {
+		t.Fatalf("WithinTx error = %v, want %v", err, errRollback)
+	}
+
+	got, err := repo.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatalf("GetGameByID: %v", err)
+	}
+	if got.HomeTeamID != homeID || got.GuestTeamID != guestID {
+		t.Fatalf("teams after rollback: got %d vs %d, want %d vs %d", got.HomeTeamID, got.GuestTeamID, homeID, guestID)
+	}
+	if got.CurrentAdminUserID != 7 || got.ControlMessageID != 55 {
+		t.Fatalf("control metadata after rollback: admin=%d message=%d", got.CurrentAdminUserID, got.ControlMessageID)
 	}
 }
 

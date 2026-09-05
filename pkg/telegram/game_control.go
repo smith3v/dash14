@@ -115,7 +115,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	if err != nil || game == nil {
 		return
 	}
-	if game.ControlMessageID != 0 && messageID != game.ControlMessageID {
+	if game.ControlMessageID == 0 || messageID != game.ControlMessageID {
 		_, _ = r.client.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: cb.ID,
 			Text:            "This control message is stale. Run /game.",

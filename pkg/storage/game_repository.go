@@ -8,6 +8,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// ErrPlannedGameChanged indicates that a guarded planned-game replacement no
+// longer matches the persisted game.
+var ErrPlannedGameChanged = errors.New("storage: planned game changed")
+
 // GameRepository provides persistence operations for Game, GameSet, and
 // AppState records.
 type GameRepository struct {
@@ -37,6 +41,52 @@ func (r *GameRepository) CreateGame(game *Game) error {
 	}
 	if err := r.db.Create(game).Error; err != nil {
 		return fmt.Errorf("storage: create game: %w", err)
+	}
+	return nil
+}
+
+// ReplacePlannedGame atomically replaces both teams on an existing planned
+// game when its identity and original teams still match the caller's snapshot.
+func (r *GameRepository) ReplacePlannedGame(
+	gameID uint,
+	expectedHomeTeamID uint,
+	expectedGuestTeamID uint,
+	newHomeTeamID uint,
+	newGuestTeamID uint,
+	adminUserID int64,
+) error {
+	result := r.db.
+		Model(&Game{}).
+		Where(
+			"id = ? AND status = ? AND home_team_id = ? AND guest_team_id = ?",
+			gameID,
+			GameStatusPlanned,
+			expectedHomeTeamID,
+			expectedGuestTeamID,
+		).
+		Updates(map[string]any{
+			"home_team_id":          newHomeTeamID,
+			"guest_team_id":         newGuestTeamID,
+			"home_team_side":        "left",
+			"guest_team_side":       "right",
+			"home_sets_won":         0,
+			"guest_sets_won":        0,
+			"current_set_number":    1,
+			"status":                GameStatusPlanned,
+			"phase":                 GamePhasePlanned,
+			"current_admin_user_id": adminUserID,
+			"control_message_id":    0,
+			"side_switched_in_set5": false,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("storage: replace planned game %d: %w", gameID, result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf(
+			"%w: game %d no longer matches the expected teams",
+			ErrPlannedGameChanged,
+			gameID,
+		)
 	}
 	return nil
 }
