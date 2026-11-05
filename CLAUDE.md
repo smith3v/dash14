@@ -61,7 +61,7 @@ dash14 --config config.yaml --import teams.yaml  # import teams and exit
 
 ## Development Notes
 
-- Go 1.26+; use `go fmt` / `goimports` before committing
+- Go 1.27.3+; use `go fmt` / `goimports` before committing
 - Run `go test ./...` before pushing; use `-cover` for new features
 - Table-driven tests in `_test.go` files colocated with the code
 - Never commit real tokens or DB passwords; use `config.example.yaml` as template
