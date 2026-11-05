@@ -1,6 +1,6 @@
 module github.com/smith3v/dash14
 
-go 1.26
+go 1.27.3
 
 require (
 	github.com/glebarez/sqlite v1.11.0
