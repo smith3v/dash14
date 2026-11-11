@@ -100,7 +100,7 @@ port to `127.0.0.1:8080` on the host.
 
 See [local Docker testing](DEPLOYMENT.md#local-testing-with-a-telegram-test-bot)
 for the test bot, database initialization, and OBS checks. See the
-[Synology rollout](DEPLOYMENT.md#synology-rollout) for the image-based Compose
+[production Docker setup](DEPLOYMENT.md#production-setup) for the image-based Compose
 stack and Cloudflare Tunnel.
 
 ## Team Import File Format
