@@ -196,8 +196,49 @@ func newPlanRouter(t *testing.T, store *planTestStore) (*Router, *FakeBot, *fake
 	renderer := &fakeOverlayRenderer{}
 	b := newTestBot(t)
 	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
-	r.SetGameServices(store.games, renderer)
+	r.SetGameServices(store.games, recordOverlayChange(t, store, renderer))
 	return r, fb, renderer
+}
+
+// recordOverlayChange observes committed match data when Telegram signals it.
+func recordOverlayChange(t *testing.T, store *planTestStore, recorder *fakeOverlayRenderer) func() {
+	t.Helper()
+	return func() {
+		game, err := store.games.GetCurrentGame()
+		if err != nil {
+			t.Fatalf("read published game: %v", err)
+		}
+		if game == nil {
+			// A finished game is no longer current; the callback itself was
+			// exercised and the published final view is tested in pkg/app.
+			return
+		}
+		home, err := store.teams.GetTeamByID(game.HomeTeamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		guest, err := store.teams.GetTeamByID(game.GuestTeamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sets, err := store.games.ListSetsByGameID(game.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if game.Status == storage.GameStatusPlanned {
+			_ = recorder.RenderPlanned(overlay.PlannedViewModel{HomeTeamName: home.Name, GuestTeamName: guest.Name})
+		}
+		for _, set := range sets {
+			if !set.IsFinished {
+				_ = recorder.RenderLive(overlay.LiveViewModel{})
+				break
+			}
+		}
+		_ = recorder.RenderIntermission(overlay.BuildIntermissionViewModel(
+			overlay.TeamIdentity{Name: home.Name}, overlay.TeamIdentity{Name: guest.Name},
+			game.HomeSetsWon, game.GuestSetsWon, overlay.BuildSetScoreHistory(sets),
+		))
+	}
 }
 
 // makePlainTextUpdate builds a *models.Update that looks like a plain text

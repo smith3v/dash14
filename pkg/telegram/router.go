@@ -6,19 +6,8 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 )
-
-// OverlayRenderer captures the overlay rendering operations used by telegram
-// handlers when game state changes.
-type OverlayRenderer interface {
-	RenderPlanned(vm overlay.PlannedViewModel) error
-	RenderLive(vm overlay.LiveViewModel) error
-	RenderIntermission(vm overlay.IntermissionViewModel) error
-	RenderIntermissionMain(vm overlay.IntermissionViewModel) error
-	RenderFinished(vm overlay.FinishedViewModel) error
-}
 
 // GameStore captures the game persistence operations used by Telegram flows.
 type GameStore interface {
@@ -29,7 +18,6 @@ type GameStore interface {
 	GetNonFinishedGame() (*storage.Game, error)
 	GetGameByID(id uint) (*storage.Game, error)
 	GetActiveSet(gameID uint) (*storage.GameSet, error)
-	ListSetsByGameID(gameID uint) ([]storage.GameSet, error)
 	SaveGame(game *storage.Game) error
 	SaveSet(set *storage.GameSet) error
 }
@@ -44,18 +32,14 @@ type Router struct {
 	users               *storage.UserRepository
 	teams               *storage.TeamRepository
 	games               GameStore
-	renderer            OverlayRenderer
+	gameChanged         func()
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
 	broadcastQueueSize  int
 	broadcastJobs       chan broadcastJob
 	broadcastWorkerOnce sync.Once
-	overlayQueueSize    int
-	overlayJobs         chan overlayJob
-	overlayWorkerOnce   sync.Once
 }
 
 const defaultBroadcastQueueSize = 32
-const defaultOverlayQueueSize = 32
 
 // NewRouter creates a Router that registers handlers on b.
 // client is the BotClient used to send messages (typically b itself, or a
@@ -69,15 +53,15 @@ func NewRouter(b *bot.Bot, logger *slog.Logger, client BotClient, users *storage
 		users:              users,
 		teams:              teams,
 		broadcastQueueSize: defaultBroadcastQueueSize,
-		overlayQueueSize:   defaultOverlayQueueSize,
 	}
 }
 
 // SetGameServices wires game-related dependencies that are optional in early
-// tests but required by /plan completion and /game flows.
-func (r *Router) SetGameServices(games GameStore, renderer OverlayRenderer) {
+// tests but required by /plan completion and /game flows. gameChanged, when
+// present, signals a committed change and must return without waiting for work.
+func (r *Router) SetGameServices(games GameStore, gameChanged func()) {
 	r.games = games
-	r.renderer = renderer
+	r.gameChanged = gameChanged
 }
 
 // Register wires all command and callback handlers onto the bot.

@@ -1,0 +1,21 @@
+http:
+  listen_address: "0.0.0.0:8081"
+
+telegram:
+  token: "123456789:AABBCCDDEEFFaabbccddeeff-example-token"
+
+sqlite:
+  path: "/data/dash14.db"
+
+overlay:
+  planned_template_path: "/app/templates/planned.html.tmpl"
+  live_template_path: "/app/templates/live.html.tmpl"
+  intermission_template_path: "/app/templates/intermission.html.tmpl"
+  finished_template_path: "/app/templates/finished.html.tmpl"
+  output_path: "/out/overlay.html"
+  logo_dir: "/data/logos"
+  template_cache_refresh_interval_seconds: 1
+
+logging:
+  level: "debug"
+  file_path: ""

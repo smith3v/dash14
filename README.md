@@ -1,7 +1,7 @@
 # dash14
 
 `dash14` is a local Go application for volleyball match control during streams.
-It stores match state in SQLite, renders OBS-ready HTML overlay files, and exposes control through a Telegram bot.
+It stores match state in SQLite, serves OBS-ready overlays over HTTP, and exposes control through a Telegram bot.
 
 ## Features
 
@@ -89,7 +89,7 @@ logging:
 
 ## Deployment
 
-For Docker Compose, `nginx`, and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
+For Docker Compose and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
 The tracked `docker-compose.yml` is deployment-oriented and reads the app image tag from a local `.env` file; local source builds use `docker-compose.dev.yml`.
 
 ## Team Import File Format
@@ -206,12 +206,10 @@ WHERE telegram_user_id = 123456789;
 
 ## OBS Setup
 
-1. Start `dash14` runtime.
-2. In OBS, add a **Browser Source** for the main overlay.
-3. Point it to `runtime/out/overlay.html`.
-4. Add a second **Browser Source** for the break screen and point it to `runtime/out/intermission.html`.
-5. The main overlay file will switch between planned, live, between-set intermission, and finished presentations as match phase changes.
-6. Re-rendering happens after state changes, including score updates and explicit next-set starts.
+1. Start Dash14.
+2. Add a **Browser Source** in URL mode for the main overlay. Use `http://127.0.0.1:8081/overlay.html` for a native run, port `8080` for local Docker, or your published HTTPS hostname.
+3. For a separate break screen, use `/intermission.html` on the same origin.
+4. Score updates appear within a polling interval on a healthy connection. The main source reloads when switching layouts.
 
 ## Development
 
@@ -253,10 +251,9 @@ gofmt -w ./...
 - `/plan` rejected with existing game message:
   - only one non-finished game is allowed at a time.
 - Overlay not updating in OBS:
-  - confirm `overlay.output_path`
-  - ensure OBS is reading the same file path.
+  - use the overlay HTTP URL in OBS and inspect `/api/v1/game` on the same origin.
 - Intermission screen not updating:
-  - ensure OBS is pointed at `intermission.html` in the same directory as `overlay.output_path`
+  - ensure OBS uses the `/intermission.html` URL
   - verify `overlay.intermission_template_path` exists and is readable.
 
 ## Security Notes

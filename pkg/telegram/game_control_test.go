@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
@@ -810,74 +809,6 @@ func TestGameControlGameFinishBroadcastsSummary(t *testing.T) {
 	}
 }
 
-type blockingOverlayRenderer struct {
-	started       chan struct{}
-	release       chan struct{}
-	mu            sync.Mutex
-	plannedCount  int
-	liveCountV    int
-	breakCount    int
-	finishedCount int
-}
-
-func (b *blockingOverlayRenderer) signalStarted() {
-	select {
-	case b.started <- struct{}{}:
-	default:
-	}
-}
-
-func (b *blockingOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
-	b.signalStarted()
-	<-b.release
-	b.mu.Lock()
-	b.plannedCount++
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *blockingOverlayRenderer) RenderLive(vm overlay.LiveViewModel) error {
-	b.signalStarted()
-	<-b.release
-	b.mu.Lock()
-	b.liveCountV++
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *blockingOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewModel) error {
-	b.signalStarted()
-	<-b.release
-	b.mu.Lock()
-	b.breakCount++
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *blockingOverlayRenderer) RenderIntermissionMain(vm overlay.IntermissionViewModel) error {
-	b.signalStarted()
-	<-b.release
-	b.mu.Lock()
-	b.breakCount++
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *blockingOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
-	b.signalStarted()
-	<-b.release
-	b.mu.Lock()
-	b.finishedCount++
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *blockingOverlayRenderer) totalCalls() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.plannedCount + b.liveCountV + b.breakCount + b.finishedCount
-}
-
 type saveFailGames struct {
 	inner        *storage.GameRepository
 	failWithinTx bool
@@ -923,7 +854,7 @@ func (b *blockingSubscriberBot) SendMessage(ctx context.Context, params *bot.Sen
 	return b.FakeBot.SendMessage(ctx, params)
 }
 
-func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
+func TestGameControlSignalsOverlayAndEditsControlBeforeBroadcast(t *testing.T) {
 	const adminID int64 = 7310
 	const subID int64 = 7311
 	const chatID int64 = 8310
@@ -934,19 +865,13 @@ func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
 		started:      make(chan int, 1),
 		release:      make(chan struct{}),
 	}
-	renderer := &blockingOverlayRenderer{
-		started: make(chan struct{}, 1),
-		release: make(chan struct{}),
-	}
+	overlayChanged := make(chan struct{}, 1)
 	releaseBroadcast := sync.OnceFunc(func() { close(fb.release) })
-	releaseOverlay := sync.OnceFunc(func() { close(renderer.release) })
 	t.Cleanup(releaseBroadcast)
-	t.Cleanup(releaseOverlay)
 	b := newTestBot(t)
 	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
-	r.overlayQueueSize = 1
 	r.broadcastQueueSize = 1
-	r.SetGameServices(store.games, renderer)
+	r.SetGameServices(store.games, func() { overlayChanged <- struct{}{} })
 	ctx := context.Background()
 
 	store.createAdminUser(t, adminID, "owner-order")
@@ -974,9 +899,9 @@ func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
 	}
 
 	select {
-	case <-renderer.started:
+	case <-overlayChanged:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for async overlay worker to start")
+		t.Fatal("timed out waiting for committed overlay signal")
 	}
 	select {
 	case edits := <-fb.started:
@@ -987,25 +912,11 @@ func TestGameControlEditsControlBeforeAsyncOverlayAndBroadcast(t *testing.T) {
 		t.Fatal("timed out waiting for async broadcast worker to start")
 	}
 
-	if len(fb.EditedMessages()) == 0 {
-		t.Fatal("expected control message to be edited before async overlay finishes")
-	}
-	if renderer.totalCalls() != 0 {
-		t.Fatal("expected overlay render to remain blocked while control edit is already visible")
-	}
 	if len(fb.SentMessages()) != 1 {
-		t.Fatalf("expected only initial control message before async side effects complete, got %d", len(fb.SentMessages()))
+		t.Fatalf("expected only initial control message before broadcast completed, got %d", len(fb.SentMessages()))
 	}
-
-	// Broadcasts do not wait for overlay rendering: finish one while the other
-	// remains blocked, rather than relying on goroutine scheduling order.
 	releaseBroadcast()
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
-	if renderer.totalCalls() != 0 {
-		t.Fatal("expected overlay render to remain blocked after broadcast completion")
-	}
-	releaseOverlay()
-	waitForCondition(t, "both overlay renders to complete", func() bool { return renderer.totalCalls() == 2 })
 }
 
 func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
@@ -1014,7 +925,7 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 	renderer := &fakeOverlayRenderer{}
 	b := newTestBot(t)
 	r := NewRouter(b, discardLogger(), fb, store.users, store.teams)
-	r.SetGameServices(store.games, renderer)
+	r.SetGameServices(store.games, recordOverlayChange(t, store, renderer))
 	ctx := context.Background()
 
 	const adminID int64 = 7312

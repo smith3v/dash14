@@ -11,14 +11,15 @@ type TeamIdentity struct {
 
 // SetScoreViewModel holds the score line for a single set.
 type SetScoreViewModel struct {
-	SetNumber  int
-	HomeScore  int
-	GuestScore int
+	SetNumber  int `json:"set"`
+	HomeScore  int `json:"home"`
+	GuestScore int `json:"guest"`
 }
 
 // PlannedViewModel holds the presentation data for a game in the planned state.
 // It is passed to the planned HTML template for rendering.
 type PlannedViewModel struct {
+	Page
 	// HomeTeamName is the full name of the home team.
 	HomeTeamName string
 
@@ -50,6 +51,7 @@ type PlannedViewModel struct {
 // It extends PlannedViewModel with score and set information, and exposes
 // left/right side fields so templates do not need to apply side-swap logic.
 type LiveViewModel struct {
+	Page
 	// HomeTeamName is the full name of the home team.
 	HomeTeamName string
 
@@ -118,6 +120,7 @@ type LiveViewModel struct {
 // IntermissionViewModel holds the presentation data for the scoreboard shown
 // before the game and between sets.
 type IntermissionViewModel struct {
+	Page
 	// HomeTeamName is the full name of the home team.
 	HomeTeamName string
 
@@ -158,6 +161,7 @@ type IntermissionViewModel struct {
 // It intentionally has its own type so the end-of-match template can evolve
 // independently from the intermission template.
 type FinishedViewModel struct {
+	Page
 	HomeTeamName string
 
 	HomeTeamShortName string
@@ -179,4 +183,30 @@ type FinishedViewModel struct {
 	GuestSetsWon int
 
 	SetScores []SetScoreViewModel
+}
+
+type historyRow struct {
+	SetScoreViewModel
+	Visible bool
+}
+
+func (vm IntermissionViewModel) HistoryRows() [5]historyRow {
+	return historyRows(vm.SetScores)
+}
+
+func (vm FinishedViewModel) HistoryRows() [5]historyRow {
+	return historyRows(vm.SetScores)
+}
+
+func historyRows(scores []SetScoreViewModel) [5]historyRow {
+	var rows [5]historyRow
+	for i := range rows {
+		rows[i].SetNumber = i + 1
+	}
+	for _, score := range scores {
+		if score.SetNumber >= 1 && score.SetNumber <= len(rows) {
+			rows[score.SetNumber-1] = historyRow{SetScoreViewModel: score, Visible: true}
+		}
+	}
+	return rows
 }

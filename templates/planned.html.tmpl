@@ -166,7 +166,7 @@
     }
   </style>
 </head>
-<body>
+<body data-overlay-view="{{.View}}" data-layout-revision="{{.Revision}}">
   <section class="overlay" aria-label="Upcoming match overlay">
     <article class="team home">
       {{if .HomeTeamLogoPath}}
@@ -202,10 +202,6 @@
       {{end}}
     </article>
   </section>
-  <script>
-    window.setInterval(() => {
-      window.location.reload();
-    }, 2000);
-  </script>
+  {{if .Revision}}<script src="/overlay-updater.js" defer></script>{{end}}
 </body>
 </html>

@@ -5,10 +5,16 @@ package config
 // Fields are grouped into nested structs by domain to keep the YAML schema
 // readable and to allow independent validation per startup mode.
 type Config struct {
+	HTTP     HTTPConfig     `yaml:"http"`
 	Telegram TelegramConfig `yaml:"telegram"`
 	SQLite   SQLiteConfig   `yaml:"sqlite"`
 	Overlay  OverlayConfig  `yaml:"overlay"`
 	Logging  LoggingConfig  `yaml:"logging"`
+}
+
+// HTTPConfig controls the address of the read-only overlay server.
+type HTTPConfig struct {
+	ListenAddress string `yaml:"listen_address"`
 }
 
 // TelegramConfig holds Telegram bot credentials and settings.
@@ -42,8 +48,7 @@ type OverlayConfig struct {
 	// overlay output.
 	FinishedTemplatePath string `yaml:"finished_template_path"`
 
-	// OutputPath is where the rendered overlay HTML file is written. OBS
-	// reads this file as a Browser Source.
+	// OutputPath is where static HTML exports and published logos are written.
 	OutputPath string `yaml:"output_path"`
 
 	// LogoDir is the managed directory where team logo files are stored.

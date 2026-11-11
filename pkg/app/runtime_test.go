@@ -13,7 +13,6 @@ import (
 	"github.com/smith3v/dash14/pkg/config"
 	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
-	"github.com/smith3v/dash14/pkg/telegram"
 )
 
 func TestRunWithDepsImportModeExitsAfterImport(t *testing.T) {
@@ -31,6 +30,7 @@ func TestRunWithDepsImportModeExitsAfterImport(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:   config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		SQLite: config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
 			LogoDir: filepath.Join(dir, "logos"),
@@ -40,7 +40,7 @@ func TestRunWithDepsImportModeExitsAfterImport(t *testing.T) {
 	telegramStarted := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		telegramStarted = true
 		return func(context.Context) {}, nil
 	}
@@ -123,6 +123,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -141,7 +142,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	sawRenderedIntermission := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {
 			telegramStarted = true
 			if _, err := os.Stat(outputPath); err == nil {
@@ -229,7 +230,8 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		LogoDir:                  filepath.Join(dir, "logos"),
 	})
 
-	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
+	publisher := newOverlayPublisher(db, renderer)
+	if err := publisher.publish(context.Background(), slog.Default()); err != nil {
 		t.Fatalf("initial renderCurrentOverlay: %v", err)
 	}
 
@@ -242,14 +244,12 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	startOverlayRefreshLoop(
-		ctx,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		20*time.Millisecond,
-		games,
-		teams,
-		renderer,
-	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		publisher.run(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), 20*time.Millisecond)
+	}()
+	t.Cleanup(func() { cancel(); <-done })
 
 	if err := os.WriteFile(plannedTpl, []byte("planned-v2 {{.HomeTeamName}}"), 0o644); err != nil {
 		t.Fatalf("write updated planned template: %v", err)
@@ -270,8 +270,6 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	cancel()
-	time.Sleep(30 * time.Millisecond)
 }
 
 func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
@@ -321,6 +319,7 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -335,7 +334,7 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	telegramStarted := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {
 			telegramStarted = true
 		}, nil
@@ -423,6 +422,7 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -437,7 +437,7 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -521,6 +521,7 @@ func TestRunWithDepsRuntimeRendersBetweenSetsOnMainOverlay(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -535,7 +536,7 @@ func TestRunWithDepsRuntimeRendersBetweenSetsOnMainOverlay(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -617,6 +618,7 @@ func TestRunWithDepsRuntimeDerivesBetweenSetsForLegacyGameWithoutActiveSet(t *te
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -631,7 +633,7 @@ func TestRunWithDepsRuntimeDerivesBetweenSetsForLegacyGameWithoutActiveSet(t *te
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -704,6 +706,7 @@ func TestRunWithDepsRuntimeIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -718,7 +721,7 @@ func TestRunWithDepsRuntimeIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -739,7 +742,7 @@ func TestRunWithDepsRuntimeIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
 	}
 }
 
-func TestRunWithDepsRuntimeDoesNotRenderFinishedGameWithoutCurrentMatch(t *testing.T) {
+func TestRunWithDepsRuntimeRestoresFinishedGameWithoutCurrentMatch(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "dash14.db")
 	outputPath := filepath.Join(dir, "overlay", "current.html")
@@ -811,6 +814,7 @@ func TestRunWithDepsRuntimeDoesNotRenderFinishedGameWithoutCurrentMatch(t *testi
 	}
 
 	cfg := config.Config{
+		HTTP:     config.HTTPConfig{ListenAddress: "127.0.0.1:0"},
 		Telegram: config.TelegramConfig{Token: "token"},
 		SQLite:   config.SQLiteConfig{Path: dbPath},
 		Overlay: config.OverlayConfig{
@@ -825,7 +829,7 @@ func TestRunWithDepsRuntimeDoesNotRenderFinishedGameWithoutCurrentMatch(t *testi
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, telegram.OverlayRenderer) (func(context.Context), error) {
+	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -833,10 +837,8 @@ func TestRunWithDepsRuntimeDoesNotRenderFinishedGameWithoutCurrentMatch(t *testi
 		t.Fatalf("runWithDeps runtime mode: %v", err)
 	}
 
-	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
-		if err != nil {
-			t.Fatalf("stat main overlay output: %v", err)
-		}
-		t.Fatalf("expected no main overlay output for finished-only history, found %s", outputPath)
+	data, err := os.ReadFile(outputPath)
+	if err != nil || !strings.Contains(string(data), "finished-main 3-1 set1 25-19") {
+		t.Fatalf("finished overlay = %q, err=%v", data, err)
 	}
 }

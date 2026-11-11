@@ -1,3 +1,6 @@
+http:
+  listen_address: "127.0.0.1:8081"
+
 # dash14 configuration example
 # Copy this file to config.yaml and fill in your values.
 # config.yaml is git-ignored; never commit real tokens.

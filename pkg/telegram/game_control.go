@@ -9,7 +9,6 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	game2 "github.com/smith3v/dash14/pkg/game"
-	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
@@ -131,7 +130,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	}
 
 	broadcastText := ""
-	var overlayJob *overlayJob
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
 		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
@@ -277,6 +275,10 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
+	if r.gameChanged != nil {
+		r.gameChanged()
+	}
+
 	game, err = r.games.GetGameByID(game.ID)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "handleGameCallback: reload game failed", "game_id", game.ID, "action", data, "err", err)
@@ -319,15 +321,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	case "game:reverse":
 		broadcastText = fmt.Sprintf("Overlay sides reversed for %s vs %s", home.Name, guest.Name)
 	}
-	if r.renderer != nil {
-		job, err := r.buildOverlayJob(game, home, guest, activeSet)
-		if err != nil {
-			r.logger.ErrorContext(ctx, "handleGameCallback: build overlay job failed", "game_id", game.ID, "err", err)
-		} else {
-			overlayJob = job
-		}
-	}
-
 	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
 	_, editErr := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      chatID,
@@ -338,10 +331,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	if editErr != nil {
 		r.logger.ErrorContext(ctx, "handleGameCallback: edit control message failed",
 			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
-	}
-
-	if overlayJob != nil {
-		r.enqueueOverlayRender(ctx, *overlayJob)
 	}
 
 	if strings.TrimSpace(broadcastText) != "" {
@@ -498,162 +487,6 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.Status = storage.GameStatus(src.Status)
 	dst.Phase = storage.GamePhase(src.Phase)
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
-}
-
-type overlayJob struct {
-	game      storage.Game
-	home      storage.Team
-	guest     storage.Team
-	activeSet *storage.GameSet
-	sets      []storage.GameSet
-}
-
-func (r *Router) buildOverlayJob(game *storage.Game, home, guest *storage.Team, activeSet *storage.GameSet) (*overlayJob, error) {
-	sets, err := r.games.ListSetsByGameID(game.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	job := &overlayJob{
-		game:  *game,
-		home:  *home,
-		guest: *guest,
-		sets:  append([]storage.GameSet(nil), sets...),
-	}
-	if activeSet != nil {
-		setCopy := *activeSet
-		job.activeSet = &setCopy
-	}
-	return job, nil
-}
-
-func (r *Router) ensureOverlayWorker() {
-	r.overlayWorkerOnce.Do(func() {
-		if r.overlayQueueSize <= 0 {
-			r.overlayQueueSize = defaultOverlayQueueSize
-		}
-		r.overlayJobs = make(chan overlayJob, r.overlayQueueSize)
-		go r.overlayLoop()
-	})
-}
-
-func (r *Router) overlayLoop() {
-	for job := range r.overlayJobs {
-		if err := r.renderOverlayJob(job); err != nil {
-			r.logger.Error("overlay render failed", "game_id", job.game.ID, "err", err)
-		}
-	}
-}
-
-func (r *Router) enqueueOverlayRender(ctx context.Context, job overlayJob) {
-	if r.renderer == nil {
-		return
-	}
-	r.ensureOverlayWorker()
-	select {
-	case r.overlayJobs <- job:
-	default:
-		r.logger.WarnContext(ctx, "Overlay: queue full, dropping render job", "game_id", job.game.ID)
-	}
-}
-
-func (r *Router) renderOverlayJob(job overlayJob) error {
-	if r.renderer == nil {
-		return nil
-	}
-	homeTeam := overlay.TeamIdentity{
-		Name:      job.home.Name,
-		ShortName: job.home.ShortName,
-		Hometown:  job.home.Hometown,
-		LogoPath:  job.home.LogoPath,
-	}
-	guestTeam := overlay.TeamIdentity{
-		Name:      job.guest.Name,
-		ShortName: job.guest.ShortName,
-		Hometown:  job.guest.Hometown,
-		LogoPath:  job.guest.LogoPath,
-	}
-	setScores := overlay.BuildSetScoreHistory(job.sets)
-	phase := job.game.EffectivePhase(job.activeSet != nil && !job.activeSet.IsFinished)
-
-	if phase == storage.GamePhasePlanned {
-		if err := r.renderer.RenderPlanned(overlay.PlannedViewModel{
-			HomeTeamName:       job.home.Name,
-			HomeTeamShortName:  job.home.ShortName,
-			HomeTeamHometown:   job.home.Hometown,
-			HomeTeamLogoPath:   job.home.LogoPath,
-			GuestTeamName:      job.guest.Name,
-			GuestTeamShortName: job.guest.ShortName,
-			GuestTeamHometown:  job.guest.Hometown,
-			GuestTeamLogoPath:  job.guest.LogoPath,
-		}); err != nil {
-			return err
-		}
-		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
-			homeTeam,
-			guestTeam,
-			job.game.HomeSetsWon,
-			job.game.GuestSetsWon,
-			setScores,
-		))
-	}
-	if phase == storage.GamePhaseBetweenSets {
-		vm := overlay.BuildIntermissionViewModel(
-			homeTeam,
-			guestTeam,
-			job.game.HomeSetsWon,
-			job.game.GuestSetsWon,
-			setScores,
-		)
-		if err := r.renderer.RenderIntermissionMain(vm); err != nil {
-			return err
-		}
-		return r.renderer.RenderIntermission(vm)
-	}
-	if phase == storage.GamePhaseFinished {
-		if err := r.renderer.RenderFinished(overlay.BuildFinishedViewModel(
-			homeTeam,
-			guestTeam,
-			job.game.HomeSetsWon,
-			job.game.GuestSetsWon,
-			setScores,
-		)); err != nil {
-			return err
-		}
-		return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
-			homeTeam,
-			guestTeam,
-			job.game.HomeSetsWon,
-			job.game.GuestSetsWon,
-			setScores,
-		))
-	}
-
-	homeScore := 0
-	guestScore := 0
-	if job.activeSet != nil {
-		homeScore = job.activeSet.HomeScore
-		guestScore = job.activeSet.GuestScore
-	}
-	if err := r.renderer.RenderLive(overlay.BuildLiveViewModel(
-		homeTeam,
-		guestTeam,
-		job.game.HomeTeamSide,
-		homeScore,
-		guestScore,
-		job.game.HomeSetsWon,
-		job.game.GuestSetsWon,
-		job.game.CurrentSetNumber,
-	)); err != nil {
-		return err
-	}
-	return r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
-		homeTeam,
-		guestTeam,
-		job.game.HomeSetsWon,
-		job.game.GuestSetsWon,
-		setScores,
-	))
 }
 
 func formatBroadcastScore(game *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {

@@ -1,3 +1,6 @@
+http:
+  listen_address: "0.0.0.0:8081"
+
 telegram:
   token: "123456789:AABBCCDDEEFFaabbccddeeff-example-token"
 

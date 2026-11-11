@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"html/template"
@@ -29,34 +30,46 @@ type Renderer struct {
 
 // NewRenderer creates a Renderer configured with the provided overlay config.
 func NewRenderer(cfg config.OverlayConfig) *Renderer {
+	renderer, err := OpenRenderer(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return renderer
+}
+
+// OpenRenderer loads all overlay templates before constructing the renderer.
+func OpenRenderer(cfg config.OverlayConfig) (*Renderer, error) {
+	templates, err := loadRendererTemplates(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &Renderer{
 		cfg:             cfg,
-		templates:       mustLoadRendererTemplates(cfg),
+		templates:       templates,
 		refreshInterval: time.Duration(cfg.TemplateCacheRefreshIntervalSeconds) * time.Second,
-	}
+	}, nil
 }
 
 type rendererTemplates struct {
+	hashes       map[*template.Template][32]byte
 	planned      *template.Template
 	live         *template.Template
 	intermission *template.Template
 	finished     *template.Template
 }
 
-func mustLoadRendererTemplates(cfg config.OverlayConfig) rendererTemplates {
-	templates, err := loadRendererTemplates(cfg)
-	if err != nil {
-		panic(err)
-	}
-	return templates
-}
-
 func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) {
+	hashes := make(map[*template.Template][32]byte)
 	parse := func(path string, label string) (*template.Template, error) {
-		tmpl, err := template.ParseFiles(path)
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("overlay: read %s template %q: %w", label, path, err)
+		}
+		tmpl, err := template.New(filepath.Base(path)).Parse(string(source))
 		if err != nil {
 			return nil, fmt.Errorf("overlay: parse %s template %q: %w", label, path, err)
 		}
+		hashes[tmpl] = sha256.Sum256(source)
 		return tmpl, nil
 	}
 
@@ -78,6 +91,7 @@ func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) 
 	}
 
 	return rendererTemplates{
+		hashes:       hashes,
 		planned:      planned,
 		live:         live,
 		intermission: intermission,
@@ -183,6 +197,12 @@ func (r *Renderer) RenderFinished(vm FinishedViewModel) error {
 // renderToPath executes tmpl with data and writes the result atomically to
 // outputPath.
 func (r *Renderer) renderToPath(tmpl *template.Template, data any, outputPath string) error {
+	return writeOverlay(outputPath, func(file *os.File) error {
+		return tmpl.Execute(file, data)
+	})
+}
+
+func writeOverlay(outputPath string, write func(*os.File) error) error {
 	outDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("overlay: create output directory: %w", err)
@@ -202,9 +222,9 @@ func (r *Renderer) renderToPath(tmpl *template.Template, data any, outputPath st
 		}
 	}()
 
-	if err = tmpl.Execute(tmp, data); err != nil {
+	if err = write(tmp); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("overlay: execute template: %w", err)
+		return fmt.Errorf("overlay: write output: %w", err)
 	}
 
 	if err = tmp.Close(); err != nil {

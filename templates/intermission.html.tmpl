@@ -216,9 +216,10 @@
         font-size: 28px;
       }
     }
+    [hidden] { display: none !important; }
   </style>
 </head>
-<body>
+<body data-overlay-view="{{.View}}" data-layout-revision="{{.Revision}}">
   <section class="overlay" aria-label="Intermission scoreboard overlay">
     <div class="header">
       <article class="team home">
@@ -255,30 +256,23 @@
     <div class="scoreboard">
       <div class="score-label">Game Score</div>
       <div class="score-value">
-        <span>{{.HomeSetsWon}}</span>
+        <span data-score="homeSetsWon">{{.HomeSetsWon}}</span>
         <span class="divider">:</span>
-        <span>{{.GuestSetsWon}}</span>
+        <span data-score="guestSetsWon">{{.GuestSetsWon}}</span>
       </div>
     </div>
 
     <div class="sets">
-      {{if .SetScores}}
-      {{range .SetScores}}
-      <div class="set-row">
-        <div class="set-score">{{.HomeScore}}</div>
+      {{range .HistoryRows}}
+      <div class="set-row" data-set="{{.SetNumber}}"{{if not .Visible}} hidden{{end}}>
+        <div class="set-score" data-set-home>{{.HomeScore}}</div>
         <div class="set-label">Set {{.SetNumber}}</div>
-        <div class="set-score guest">{{.GuestScore}}</div>
+        <div class="set-score guest" data-set-guest>{{.GuestScore}}</div>
       </div>
       {{end}}
-      {{else}}
-      <div class="empty-state">Match has not started</div>
-      {{end}}
+      <div class="empty-state" data-empty-history{{if .SetScores}} hidden{{end}}>Match has not started</div>
     </div>
   </section>
-  <script>
-    window.setInterval(() => {
-      window.location.reload();
-    }, 2000);
-  </script>
+  {{if .Revision}}<script src="/overlay-updater.js" defer></script>{{end}}
 </body>
 </html>
