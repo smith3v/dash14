@@ -14,3 +14,11 @@ var
 *.test
 .DS_Store
 config.yaml
+
+.env
+.env.local
+runtime
+deploy/config/config.container.yaml
+deploy/config/config.dev.yaml
+deploy/cloudflared/config.yml
+deploy/cloudflared/credentials.json

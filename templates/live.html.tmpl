@@ -180,16 +180,16 @@
     }
   </style>
 </head>
-<body>
+<body data-overlay-view="{{.View}}" data-layout-revision="{{.Revision}}">
   <section class="overlay" aria-label="Live game overlay">
     <article class="team left-team">
       <div class="meta">
         <div class="role">{{.LeftTeamLabel}}</div>
         <div class="name">{{.LeftTeamName}}</div>
-        <div class="sets">Sets <strong>{{.LeftSetsWon}}</strong></div>
+        <div class="sets">Sets <strong data-score="{{if eq .LeftTeamLabel "Home Team"}}homeSetsWon{{else}}guestSetsWon{{end}}">{{.LeftSetsWon}}</strong></div>
       </div>
       <div class="points">
-        <div class="points-value">{{.LeftScore}}</div>
+        <div class="points-value" data-score="{{if eq .LeftTeamLabel "Home Team"}}homePoints{{else}}guestPoints{{end}}">{{.LeftScore}}</div>
         <div class="points-label">Points</div>
       </div>
     </article>
@@ -204,20 +204,16 @@
 
     <article class="team right-team">
       <div class="points">
-        <div class="points-value">{{.RightScore}}</div>
+        <div class="points-value" data-score="{{if eq .RightTeamLabel "Home Team"}}homePoints{{else}}guestPoints{{end}}">{{.RightScore}}</div>
         <div class="points-label">Points</div>
       </div>
       <div class="meta">
         <div class="role">{{.RightTeamLabel}}</div>
         <div class="name">{{.RightTeamName}}</div>
-        <div class="sets">Sets <strong>{{.RightSetsWon}}</strong></div>
+        <div class="sets">Sets <strong data-score="{{if eq .RightTeamLabel "Home Team"}}homeSetsWon{{else}}guestSetsWon{{end}}">{{.RightSetsWon}}</strong></div>
       </div>
     </article>
   </section>
-<script>
-    window.setInterval(() => {
-      window.location.reload();
-    }, 2000);
-  </script>
+  {{if .Revision}}<script src="/overlay-updater.js" defer></script>{{end}}
 </body>
 </html>

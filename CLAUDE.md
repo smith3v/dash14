@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`dash14` is a local Go application for managing a volleyball match scoreboard overlay. It runs on the streaming laptop alongside OBS, persists state in SQLite, renders an HTML overlay file for OBS, and exposes match control through a Telegram bot.
+`dash14` is a local Go application for managing a volleyball match scoreboard overlay. It runs on the streaming laptop alongside OBS, persists state in SQLite, serves the OBS overlay over HTTP, and exposes match control through a Telegram bot.
 
 ## Key Design Documents
 
@@ -46,8 +46,9 @@ dash14 --config config.yaml --import teams.yaml  # import teams and exit
 
 ## Overlay Output
 
-- The runtime writes the current overlay HTML to the configured output file.
-- In container deployments, `nginx` serves the generated files from `runtime/out`.
+- The Go server serves the overlay pages, logos, and `GET /api/v1/game`. OBS uses the HTTP overlay URLs.
+- Cloudflare Tunnel connects directly to `http://app:8081` on the Compose network.
+- The runtime also writes static overlay exports to the configured output directory.
 
 ## Commands
 

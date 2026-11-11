@@ -1,5 +1,17 @@
+name: dash14-dev
+
 services:
   app:
     build:
       context: .
     image: dash14:local
+    user: "${DASH14_DEV_UID:-1000}:${DASH14_DEV_GID:-1000}"
+    working_dir: /workspace
+    ports:
+      - "127.0.0.1:8080:8081"
+    volumes:
+      - ./deploy/config/config.dev.yaml:/config/config.yaml:ro
+      - ./runtime/dev/data:/data
+      - ./runtime/dev/out:/out
+      - ./templates:/app/templates:ro
+      - ./teams:/workspace/teams:ro

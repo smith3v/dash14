@@ -1,4 +1,4 @@
-.PHONY: build test lint run import compose-up compose-down compose-logs compose-config compose-dev-up
+.PHONY: build test lint run import compose-up compose-down compose-logs compose-config compose-dev-up compose-dev-down compose-dev-logs
 
 BINARY ?= ./bin/dash14
 CMD ?= ./cmd/dash14
@@ -6,7 +6,7 @@ CONFIG ?= config.yaml
 IMPORT_FILE ?= teams/teams.yaml
 COMPOSE ?= docker compose
 COMPOSE_FILES ?= -f docker-compose.yml
-COMPOSE_DEV_FILES ?= -f docker-compose.yml -f docker-compose.dev.yml
+COMPOSE_DEV_FILES ?= -f docker-compose.dev.yml
 
 build:
 	mkdir -p $(dir $(BINARY))
@@ -43,4 +43,10 @@ compose-config:
 	$(COMPOSE) $(COMPOSE_FILES) config
 
 compose-dev-up:
-	$(COMPOSE) $(COMPOSE_DEV_FILES) up --build
+	$(COMPOSE) $(COMPOSE_DEV_FILES) up --build -d
+
+compose-dev-down:
+	$(COMPOSE) $(COMPOSE_DEV_FILES) down
+
+compose-dev-logs:
+	$(COMPOSE) $(COMPOSE_DEV_FILES) logs -f

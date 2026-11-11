@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/smith3v/dash14/pkg/overlay"
 	"github.com/smith3v/dash14/pkg/storage"
 )
 
@@ -495,9 +494,9 @@ func (r *Router) finalizePlannedGame(
 		})
 		return
 	}
-	if r.games == nil || r.renderer == nil {
+	if r.games == nil {
 		r.logger.ErrorContext(ctx, "finalizePlannedGame: dependencies missing",
-			"user_id", userID, "has_games", r.games != nil, "has_renderer", r.renderer != nil)
+			"user_id", userID, "has_games", r.games != nil)
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "Something went wrong. Please try again.",
@@ -552,6 +551,9 @@ func (r *Router) finalizePlannedGame(
 	// Consume the completed wizard before external side effects so repeated
 	// callbacks cannot apply or render the same replacement twice.
 	r.plans.Delete(userID)
+	if r.gameChanged != nil {
+		r.gameChanged()
+	}
 
 	if isReplacement &&
 		state.Replacement.PreviousControlMessageID != 0 &&
@@ -573,51 +575,6 @@ func (r *Router) finalizePlannedGame(
 				"err", err,
 			)
 		}
-	}
-
-	vm := overlay.PlannedViewModel{
-		HomeTeamName:       state.HomeTeam.Name,
-		HomeTeamShortName:  state.HomeTeam.ShortName,
-		HomeTeamHometown:   state.HomeTeam.Hometown,
-		HomeTeamLogoPath:   state.HomeTeam.LogoPath,
-		GuestTeamName:      guestTeam.Name,
-		GuestTeamShortName: guestTeam.ShortName,
-		GuestTeamHometown:  guestTeam.Hometown,
-		GuestTeamLogoPath:  guestTeam.LogoPath,
-	}
-	if err := r.renderer.RenderPlanned(vm); err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: render planned overlay failed",
-			"user_id", userID, "game_id", game.ID, "err", err)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Game was planned, but overlay rendering failed. Please check logs.",
-		})
-		return
-	}
-	if err := r.renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
-		overlay.TeamIdentity{
-			Name:      state.HomeTeam.Name,
-			ShortName: state.HomeTeam.ShortName,
-			Hometown:  state.HomeTeam.Hometown,
-			LogoPath:  state.HomeTeam.LogoPath,
-		},
-		overlay.TeamIdentity{
-			Name:      guestTeam.Name,
-			ShortName: guestTeam.ShortName,
-			Hometown:  guestTeam.Hometown,
-			LogoPath:  guestTeam.LogoPath,
-		},
-		0,
-		0,
-		nil,
-	)); err != nil {
-		r.logger.ErrorContext(ctx, "finalizePlannedGame: render intermission overlay failed",
-			"user_id", userID, "game_id", game.ID, "err", err)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Game was planned, but intermission overlay rendering failed. Please check logs.",
-		})
-		return
 	}
 
 	result := "created"

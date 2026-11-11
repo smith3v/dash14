@@ -2,10 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
@@ -33,7 +33,6 @@ type runtimeDeps struct {
 	newLogger    func(cfg config.LoggingConfig) (*slog.Logger, func(), error)
 	openDB       func(path string) (*gorm.DB, error)
 	migrate      func(db *gorm.DB) error
-	newRenderer  func(cfg config.OverlayConfig) *overlay.Renderer
 	newLogoStore func(logoDir string) *importer.LogoStore
 	newImporter  func(repo *storage.TeamRepository, logos *importer.LogoStore) *importer.Importer
 	newTelegram  func(
@@ -42,9 +41,8 @@ type runtimeDeps struct {
 		users *storage.UserRepository,
 		teams *storage.TeamRepository,
 		games *storage.GameRepository,
-		renderer telegram.OverlayRenderer,
+		gameChanged func(),
 	) (func(context.Context), error)
-	validateTempl func(cfg config.OverlayConfig) error
 }
 
 func defaultRuntimeDeps() runtimeDeps {
@@ -53,7 +51,6 @@ func defaultRuntimeDeps() runtimeDeps {
 		newLogger:    logging.New,
 		openDB:       storage.Open,
 		migrate:      storage.Migrate,
-		newRenderer:  overlay.NewRenderer,
 		newLogoStore: importer.NewLogoStore,
 		newImporter:  importer.NewImporter,
 		newTelegram: func(
@@ -62,18 +59,17 @@ func defaultRuntimeDeps() runtimeDeps {
 			users *storage.UserRepository,
 			teams *storage.TeamRepository,
 			games *storage.GameRepository,
-			renderer telegram.OverlayRenderer,
+			gameChanged func(),
 		) (func(context.Context), error) {
 			b, err := telegram.New(token)
 			if err != nil {
 				return nil, err
 			}
 			r := telegram.NewRouter(b, logger, b, users, teams)
-			r.SetGameServices(games, renderer)
+			r.SetGameServices(games, gameChanged)
 			r.Register()
 			return b.Start, nil
 		},
-		validateTempl: validateOverlayTemplates,
 	}
 }
 
@@ -125,185 +121,67 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 		return nil
 	}
 
-	if err := deps.validateTempl(cfg.Overlay); err != nil {
-		return fmt.Errorf("app: validate overlay templates: %w", err)
+	renderer, err := overlay.OpenRenderer(cfg.Overlay)
+	if err != nil {
+		return err
 	}
-	renderer := deps.newRenderer(cfg.Overlay)
-	startOverlayRefreshLoop(
-		ctx,
-		logger,
-		time.Duration(cfg.Overlay.TemplateCacheRefreshIntervalSeconds)*time.Second,
-		games,
-		teams,
-		renderer,
-	)
-	if err := renderCurrentOverlay(games, teams, renderer); err != nil {
-		return fmt.Errorf("app: render current overlay: %w", err)
+	publisher := newOverlayPublisher(db, renderer)
+	if err := publisher.web.Publish(nil); err != nil {
+		return fmt.Errorf("app: publish idle overlay: %w", err)
+	}
+	if err := publisher.publish(ctx, logger); err != nil {
+		logger.Error("initial overlay publication failed", "err", err)
+		publisher.notify()
 	}
 
-	startTelegram, err := deps.newTelegram(cfg.Telegram.Token, logger, users, teams, games, renderer)
+	startTelegram, err := deps.newTelegram(cfg.Telegram.Token, logger, users, teams, games, publisher.notify)
 	if err != nil {
 		return fmt.Errorf("app: init telegram bot: %w", err)
 	}
-	startTelegram(ctx)
-	return nil
-}
-
-func startOverlayRefreshLoop(
-	ctx context.Context,
-	logger *slog.Logger,
-	interval time.Duration,
-	games *storage.GameRepository,
-	teams *storage.TeamRepository,
-	renderer *overlay.Renderer,
-) {
-	if interval <= 0 {
-		return
+	address := cfg.HTTP.ListenAddress
+	if address == "" {
+		address = "127.0.0.1:8081"
 	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("app: listen for overlay HTTP: %w", err)
+	}
+	logger.Info("overlay HTTP listening", "address", listener.Addr().String())
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	publishDone := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := renderer.RefreshTemplates(); err != nil {
-					if logger != nil {
-						logger.Error("overlay template refresh failed", "err", err)
-					}
-					continue
-				}
-				if err := renderCurrentOverlay(games, teams, renderer); err != nil && logger != nil {
-					logger.Error("overlay rerender failed after template refresh", "err", err)
-				}
-			}
-		}
+		defer close(publishDone)
+		publisher.run(runCtx, logger, time.Duration(cfg.Overlay.TemplateCacheRefreshIntervalSeconds)*time.Second)
 	}()
-}
 
-func validateOverlayTemplates(cfg config.OverlayConfig) error {
-	if _, err := os.Stat(cfg.PlannedTemplatePath); err != nil {
-		return err
+	server := &http.Server{
+		Handler:           publisher.web,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
-	if _, err := os.Stat(cfg.LiveTemplatePath); err != nil {
-		return err
-	}
-	if _, err := os.Stat(cfg.IntermissionTemplatePath); err != nil {
-		return err
-	}
-	if _, err := os.Stat(cfg.FinishedTemplatePath); err != nil {
-		return err
-	}
-	return nil
-}
-
-func renderCurrentOverlay(games *storage.GameRepository, teams *storage.TeamRepository, renderer *overlay.Renderer) error {
-	current, err := games.GetCurrentGame()
-	if err != nil {
-		return err
-	}
-	if current == nil {
-		return nil
-	}
-
-	home, err := teams.GetTeamByID(current.HomeTeamID)
-	if err != nil {
-		return err
-	}
-	guest, err := teams.GetTeamByID(current.GuestTeamID)
-	if err != nil {
-		return err
-	}
-	sets, err := games.ListSetsByGameID(current.ID)
-	if err != nil {
-		return err
-	}
-	homeTeam := overlay.TeamIdentity{
-		Name:      home.Name,
-		ShortName: home.ShortName,
-		Hometown:  home.Hometown,
-		LogoPath:  home.LogoPath,
-	}
-	guestTeam := overlay.TeamIdentity{
-		Name:      guest.Name,
-		ShortName: guest.ShortName,
-		Hometown:  guest.Hometown,
-		LogoPath:  guest.LogoPath,
-	}
-	setScores := overlay.BuildSetScoreHistory(sets)
-
-	set, err := games.GetActiveSet(current.ID)
-	hasActiveSet := true
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
+	httpDone := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if err != http.ErrServerClosed {
+			cancel()
 		}
-		hasActiveSet = false
-		set = &storage.GameSet{SetNumber: current.CurrentSetNumber}
-	}
+		httpDone <- err
+	}()
 
-	phase := current.EffectivePhase(hasActiveSet)
-	switch phase {
-	case storage.GamePhasePlanned:
-		if err := renderer.RenderPlanned(overlay.PlannedViewModel{
-			HomeTeamName:       home.Name,
-			HomeTeamShortName:  home.ShortName,
-			HomeTeamHometown:   home.Hometown,
-			HomeTeamLogoPath:   home.LogoPath,
-			GuestTeamName:      guest.Name,
-			GuestTeamShortName: guest.ShortName,
-			GuestTeamHometown:  guest.Hometown,
-			GuestTeamLogoPath:  guest.LogoPath,
-		}); err != nil {
-			return err
-		}
-	case storage.GamePhaseSetInProgress:
-		homeScore := set.HomeScore
-		guestScore := set.GuestScore
-		if err := renderer.RenderLive(overlay.BuildLiveViewModel(
-			homeTeam,
-			guestTeam,
-			current.HomeTeamSide,
-			homeScore,
-			guestScore,
-			current.HomeSetsWon,
-			current.GuestSetsWon,
-			current.CurrentSetNumber,
-		)); err != nil {
-			return err
-		}
-	case storage.GamePhaseBetweenSets:
-		if err := renderer.RenderIntermissionMain(overlay.BuildIntermissionViewModel(
-			homeTeam,
-			guestTeam,
-			current.HomeSetsWon,
-			current.GuestSetsWon,
-			setScores,
-		)); err != nil {
-			return err
-		}
-	case storage.GamePhaseFinished:
-		if err := renderer.RenderFinished(overlay.BuildFinishedViewModel(
-			homeTeam,
-			guestTeam,
-			current.HomeSetsWon,
-			current.GuestSetsWon,
-			setScores,
-		)); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("app: unsupported game phase %q", phase)
+	startTelegram(runCtx)
+	cancel()
+	shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	shutdownErr := server.Shutdown(shutdownCtx)
+	if shutdownErr != nil {
+		_ = server.Close()
 	}
-
-	return renderer.RenderIntermission(overlay.BuildIntermissionViewModel(
-		homeTeam,
-		guestTeam,
-		current.HomeSetsWon,
-		current.GuestSetsWon,
-		setScores,
-	))
+	<-publishDone
+	if err := <-httpDone; err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("app: serve overlay HTTP: %w", err)
+	}
+	return shutdownErr
 }
