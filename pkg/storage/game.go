@@ -32,7 +32,7 @@ const (
 )
 
 // DeriveGamePhase maps the coarse persisted game status plus active-set
-// presence into the operator-visible game phase used by the new overlay flow.
+// presence into the operator-visible game phase.
 func DeriveGamePhase(status GameStatus, hasActiveSet bool) GamePhase {
 	switch status {
 	case GameStatusPlanned:
@@ -71,10 +71,6 @@ type Game struct {
 
 	// Status is the lifecycle state of the game.
 	Status GameStatus `gorm:"not null;default:'planned'"`
-
-	// Phase is the operator-visible state of the game. It is persisted on the
-	// existing games row, not in a separate history table.
-	Phase GamePhase `gorm:"not null;default:'planned'"`
 
 	// CurrentAdminUserID is the Telegram user ID of the admin currently
 	// managing this game. Zero means no admin is assigned.

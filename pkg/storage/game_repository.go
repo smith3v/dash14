@@ -5,15 +5,13 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // ErrPlannedGameChanged indicates that a guarded planned-game replacement no
 // longer matches the persisted game.
 var ErrPlannedGameChanged = errors.New("storage: planned game changed")
 
-// GameRepository provides persistence operations for Game, GameSet, and
-// AppState records.
+// GameRepository provides persistence operations for Game and GameSet records.
 type GameRepository struct {
 	db *gorm.DB
 }
@@ -36,9 +34,6 @@ func (r *GameRepository) WithinTx(fn func(repo *GameRepository) error) error {
 
 // CreateGame inserts a new Game record and populates its ID on success.
 func (r *GameRepository) CreateGame(game *Game) error {
-	if game.Phase == "" {
-		game.Phase = DeriveGamePhase(game.Status, false)
-	}
 	if err := r.db.Create(game).Error; err != nil {
 		return fmt.Errorf("storage: create game: %w", err)
 	}
@@ -73,7 +68,6 @@ func (r *GameRepository) ReplacePlannedGame(
 			"guest_sets_won":        0,
 			"current_set_number":    1,
 			"status":                GameStatusPlanned,
-			"phase":                 GamePhasePlanned,
 			"current_admin_user_id": adminUserID,
 			"control_message_id":    0,
 			"side_switched_in_set5": false,
@@ -112,23 +106,6 @@ func (r *GameRepository) GetCurrentGame() (*Game, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("storage: get current game: %w", err)
-	}
-	return &game, nil
-}
-
-// GetNonFinishedGame returns one game whose status is not finished.
-// It returns nil, nil when no planned/in-progress game exists.
-func (r *GameRepository) GetNonFinishedGame() (*Game, error) {
-	var game Game
-	err := r.db.
-		Where("status <> ?", GameStatusFinished).
-		Order("id DESC").
-		First(&game).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("storage: get non-finished game: %w", err)
 	}
 	return &game, nil
 }
@@ -178,13 +155,6 @@ func (r *GameRepository) ListSetsByGameID(gameID uint) ([]GameSet, error) {
 // SaveGame persists all fields of the given game record. The game must already
 // exist (have a non-zero ID).
 func (r *GameRepository) SaveGame(game *Game) error {
-	if game.Phase == "" {
-		hasActiveSet, err := r.hasActiveSet(game.ID)
-		if err != nil {
-			return err
-		}
-		game.Phase = DeriveGamePhase(game.Status, hasActiveSet)
-	}
 	if err := r.db.Save(game).Error; err != nil {
 		return fmt.Errorf("storage: save game %d: %w", game.ID, err)
 	}
@@ -198,48 +168,4 @@ func (r *GameRepository) SaveSet(set *GameSet) error {
 		return fmt.Errorf("storage: save set %d: %w", set.ID, err)
 	}
 	return nil
-}
-
-// SetCurrentGameID upserts the singleton AppState row (ID=1) with the given
-// game ID as the current game.
-func (r *GameRepository) SetCurrentGameID(id uint) error {
-	state := AppState{
-		ID:            1,
-		CurrentGameID: &id,
-	}
-	result := r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"current_game_id", "updated_at"}),
-	}).Create(&state)
-	if result.Error != nil {
-		return fmt.Errorf("storage: set current game id %d: %w", id, result.Error)
-	}
-	return nil
-}
-
-// ClearCurrentGameID upserts the singleton AppState row (ID=1) with
-// CurrentGameID set to nil, indicating no active game.
-func (r *GameRepository) ClearCurrentGameID() error {
-	result := r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"current_game_id", "updated_at"}),
-	}).Create(&AppState{ID: 1, CurrentGameID: nil})
-	if result.Error != nil {
-		return fmt.Errorf("storage: clear current game id: %w", result.Error)
-	}
-	return nil
-}
-
-func (r *GameRepository) hasActiveSet(gameID uint) (bool, error) {
-	if gameID == 0 {
-		return false, nil
-	}
-
-	var count int64
-	if err := r.db.Model(&GameSet{}).
-		Where("game_id = ? AND is_finished = ?", gameID, false).
-		Count(&count).Error; err != nil {
-		return false, fmt.Errorf("storage: count active sets for game %d: %w", gameID, err)
-	}
-	return count > 0, nil
 }

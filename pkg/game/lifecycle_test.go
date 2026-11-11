@@ -22,13 +22,6 @@ func TestStartPlannedGame(t *testing.T) {
 			wantPhase: PhaseSetInProgress,
 		},
 		{
-			name: "legacy planned status without explicit phase still starts",
-			input: GameState{
-				Status: "planned",
-			},
-			wantPhase: PhaseSetInProgress,
-		},
-		{
 			name: "already live returns error",
 			input: GameState{
 				Status: "in_progress",
@@ -134,24 +127,6 @@ func TestConfirmSetFinished(t *testing.T) {
 			wantGuestSetsWon: 1,
 			wantPromptFinish: true,
 			wantCurrentSet:   4,
-		},
-		{
-			name: "legacy in_progress status without explicit phase still works",
-			game: GameState{
-				Status:           "in_progress",
-				CurrentSetNumber: 1,
-			},
-			set: SetState{
-				SetScore: SetScore{
-					HomeScore:  25,
-					GuestScore: 22,
-					SetNumber:  1,
-				},
-			},
-			wantPhase:        PhaseBetweenSets,
-			wantHomeSetsWon:  1,
-			wantGuestSetsWon: 0,
-			wantCurrentSet:   1,
 		},
 		{
 			name: "not finishable score returns error",
@@ -267,7 +242,7 @@ func TestStartNextSet(t *testing.T) {
 			wantCarrySide: true,
 		},
 		{
-			name: "legacy in_progress status without explicit phase is rejected",
+			name: "missing phase is rejected",
 			game: GameState{
 				Status:           "in_progress",
 				CurrentSetNumber: 3,
@@ -339,7 +314,7 @@ func TestConfirmGameFinished(t *testing.T) {
 			wantPhase:  PhaseFinished,
 		},
 		{
-			name: "legacy finish eligible without explicit phase is rejected",
+			name: "finish-eligible game without phase is rejected",
 			game: GameState{
 				Status:       "in_progress",
 				HomeSetsWon:  3,

@@ -511,7 +511,6 @@ func (r *Router) finalizePlannedGame(
 		GuestTeamSide:      "right",
 		CurrentSetNumber:   1,
 		Status:             storage.GameStatusPlanned,
-		Phase:              storage.GamePhasePlanned,
 		CurrentAdminUserID: userID,
 	}
 	isReplacement := state.Replacement != nil
