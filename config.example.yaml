@@ -1,9 +1,10 @@
-http:
-  listen_address: "127.0.0.1:8081"
-
 # dash14 configuration example
 # Copy this file to config.yaml and fill in your values.
 # config.yaml is git-ignored; never commit real tokens.
+
+http:
+  # Overlay server address. Defaults to 127.0.0.1:8081 when omitted.
+  listen_address: "127.0.0.1:8081"
 
 telegram:
   # token is the Telegram bot token issued by BotFather.
@@ -33,8 +34,8 @@ overlay:
   # when the game is over and the final result should be shown.
   finished_template_path: "templates/finished.html.tmpl"
 
-  # output_path is where the rendered overlay HTML file is written.
-  # Point your OBS Browser Source at this file.
+  # output_path is the path for the static HTML export.
+  # For live updates, use the overlay HTTP URL in OBS.
   output_path: "runtime/out/overlay.html"
 
   # logo_dir is the managed directory where team logo files are stored.

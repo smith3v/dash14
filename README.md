@@ -67,6 +67,9 @@ So update overlay template paths accordingly.
 ### Minimal working config example
 
 ```yaml
+http:
+  listen_address: "127.0.0.1:8081"
+
 telegram:
   token: "123456789:your-real-bot-token"
 
@@ -87,10 +90,18 @@ logging:
   file_path: "runtime/logs/dash14.log"
 ```
 
+`http.listen_address` controls where the overlay HTTP server binds. Existing
+configs that omit it default to `127.0.0.1:8081`, reachable only from the machine
+running Dash14. If you set a different port, use it in your native OBS URLs.
+The container examples bind to `0.0.0.0:8081` inside Docker. Compose maps that
+port to `127.0.0.1:8080` on the host.
+
 ## Deployment
 
-For Docker Compose and Cloudflare Tunnel setup, see `DEPLOYMENT.md`.
-The tracked `docker-compose.yml` is deployment-oriented and reads the app image tag from a local `.env` file; local source builds use `docker-compose.dev.yml`.
+See [local Docker testing](DEPLOYMENT.md#local-testing-with-a-telegram-test-bot)
+for the test bot, database initialization, and OBS checks. See the
+[Synology rollout](DEPLOYMENT.md#synology-rollout) for the image-based Compose
+stack and Cloudflare Tunnel.
 
 ## Team Import File Format
 
@@ -136,7 +147,7 @@ Example:
 ### 1. Import mode (teams + logos, then exit)
 
 ```bash
-./dash14 --config config.yaml --import teams.yaml
+./dash14 --config config.yaml --import teams/teams.yaml
 ```
 
 What it does:
@@ -146,7 +157,7 @@ What it does:
 - opens SQLite and runs migrations
 - imports/upserts teams
 - copies logos to `overlay.logo_dir`
-- exits without starting Telegram polling
+- exits after import
 
 ### 2. Runtime mode (normal operation)
 
@@ -160,7 +171,8 @@ What it does:
 - initializes logging
 - opens SQLite and runs migrations
 - validates template paths
-- renders current overlay pages (if a current game exists)
+- publishes the active match or most recent finished match, with a transparent overlay before the first match
+- serves the overlay pages, team logos, updater, and read-only `GET /api/v1/game` on `http.listen_address`
 - starts optional template refresh polling when `overlay.template_cache_refresh_interval_seconds > 0`
 - starts Telegram update polling and blocks
 
@@ -209,7 +221,9 @@ WHERE telegram_user_id = 123456789;
 1. Start Dash14.
 2. Add a **Browser Source** in URL mode for the main overlay. Use `http://127.0.0.1:8081/overlay.html` for a native run, port `8080` for local Docker, or your published HTTPS hostname.
 3. For a separate break screen, use `/intermission.html` on the same origin.
-4. Score updates appear within a polling interval on a healthy connection. The main source reloads when switching layouts.
+4. Score updates appear in place within about two seconds on a healthy
+   connection. The main source reloads when switching layouts. The standalone
+   intermission scoreboard stays loaded across match phases.
 
 ## Development
 
@@ -250,8 +264,12 @@ gofmt -w ./...
   - check network connectivity and logs.
 - `/plan` rejected with existing game message:
   - only one non-finished game is allowed at a time.
-- Overlay not updating in OBS:
+- Overlay URL unreachable
+  - check the app log for the bound address or a port conflict.
+  - use port `8081` for a default native run and `8080` for Docker on the same host.
+- Overlay not updating in OBS
   - use the overlay HTTP URL in OBS and inspect `/api/v1/game` on the same origin.
+  - remove `?updates=off` from the URL to resume polling.
 - Intermission screen not updating:
   - ensure OBS uses the `/intermission.html` URL
   - verify `overlay.intermission_template_path` exists and is readable.

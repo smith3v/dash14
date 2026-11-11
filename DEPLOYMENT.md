@@ -7,7 +7,9 @@ has a loopback endpoint at `http://127.0.0.1:8080` for smoke checks.
 
 ## Local testing with a Telegram test bot
 
-From the feature checkout, create a local config and writable runtime paths.
+From the repository root, create a local config and writable runtime paths.
+If the example file is missing, check out the branch or release containing
+the HTTP overlay update.
 
 ```sh
 cp deploy/config/config.dev.example.yaml deploy/config/config.dev.yaml
@@ -16,13 +18,23 @@ export DASH14_DEV_UID="$(id -u)" DASH14_DEV_GID="$(id -g)"
 ```
 
 Set `telegram.token` in the ignored dev config to a dedicated test bot's token.
-Use a fresh bot so only the test instance receives its updates. The dev stack
-uses port `8080`; stop any other local stack using that port.
+Use a fresh bot so only the test instance receives its updates. Keep
+`http.listen_address: "0.0.0.0:8081"` in the dev config. The container listens
+on port `8081` and Compose publishes it on host loopback port `8080`. Stop any
+other local stack using host port `8080`.
 
 ```sh
 make compose-dev-up
 docker compose -f docker-compose.dev.yml run --rm app \
   --config /config/config.yaml --import /workspace/teams/teams.yaml
+```
+
+The one-shot import initializes the SQLite schema if needed and loads the
+team catalog and logos into `runtime/dev/data`. Run it again when updating the
+catalog. Verify the import before planning a match.
+
+```sh
+sqlite3 -readonly runtime/dev/data/dash14.db 'SELECT count(*) FROM teams;'
 ```
 
 Send `/start` to the test bot in a private chat. List registered users and grant
@@ -36,8 +48,8 @@ sqlite3 runtime/dev/data/dash14.db \
 
 1. Open `http://127.0.0.1:8080/overlay.html` and
    `http://127.0.0.1:8080/intermission.html` in a browser and add the same URLs as
-   OBS Browser Sources. Before planning, both pages are transparent and the API
-   reports `game: null`.
+   OBS Browser Sources. On a fresh database, both pages are transparent before
+   the first match and the API reports `game: null`.
 2. Use `/plan` to select two teams, then `/game` to open the controls. Start the
    game, add a point to each side, and undo back to 0–0. Both pages should
    update within about two seconds and keep the same document. The standalone
@@ -71,7 +83,8 @@ to `ghcr.io/smith3v/dash14:<tag>`.
    its image tag in `.env`. In the mounted
    `deploy/config/config.container.yaml`, add `http.listen_address` with value
    `0.0.0.0:8081` as shown in the tracked example. Keep the existing mounted
-   data, output, and log directories.
+   data, output, and log directories. A loopback bind inside the app container
+   would make it unreachable from Cloudflared and Docker's host port mapping.
 4. In the mounted `deploy/cloudflared/config.yml`, set the overlay hostname's
    service to `http://app:8081`. Keep the hostname, tunnel ID, credentials file,
    and catch-all rule. New installations can start from the tracked examples.
