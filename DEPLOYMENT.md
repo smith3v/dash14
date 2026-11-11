@@ -1,168 +1,273 @@
-# Docker deployment
+# Deployment
 
-The production stack in `docker-compose.yml` runs Dash14 and Cloudflare Tunnel.
-Set `DASH14_IMAGE` in the ignored `.env` file to pin the Dash14 release.
-GitHub Actions publishes `linux/amd64` and `linux/arm64` images as
-`ghcr.io/smith3v/dash14:<tag>`. The standalone `docker-compose.dev.yml` builds
-from source for local testing.
+`dash14` can be deployed as a two-service stack with:
+
+- `app` running `dash14` and serving the overlays over HTTP
+- `cloudflared` publishing the app endpoint on your domain
+
+The canonical stack definition lives in `docker-compose.yml`. It is image-based so you can pin the deployed image tag in a local `.env` file.
+
+Release images published by GitHub Actions are pushed to:
+
+- `ghcr.io/smith3v/dash14:<git-tag>`
+
+Examples:
+
+- `ghcr.io/smith3v/dash14:v0.1.0`
+- `ghcr.io/smith3v/dash14:v1.2.3`
 
 ## Runtime Contract
 
-- The app reads `./deploy/config/config.container.yaml` at `/config/config.yaml`.
-  Its four overlay templates are baked into the image under `/app/templates`.
-- The image runs as the `dash14` user. Give that user write access to the
-  mounted runtime directories.
+- `dash14` reads a mounted YAML config file.
+- Template files are baked into the app image.
+- SQLite, team logos, static overlay exports, and logs live on mounted writable storage.
+- Go serves the overlay pages, logos, updater, and `GET /api/v1/game` on port `8081` in the app container.
+- Compose publishes the app on host loopback at `127.0.0.1:8080`. Cloudflare Tunnel connects directly to `http://app:8081` over the Compose network.
 
-  | Host path | Container path | Contents |
-  | --- | --- | --- |
-  | `./runtime/data` | `/data` | SQLite database and managed team logos |
-  | `./runtime/out` | `/out` | Static overlay HTML and logo exports |
-  | `./runtime/logs` | `/logs` | App logs when file logging is configured |
+Release images support `linux/arm64` and `linux/amd64`, including Apple Silicon Docker hosts and Intel Docker hosts.
 
-- The Go server binds to `0.0.0.0:8081` inside the app container. It serves
-  `/`, `/overlay.html`, `/intermission.html`, team logos, the updater, and
-  `GET /api/v1/game`. Use the HTTP URLs in OBS for live updates.
-- Compose publishes the app at `http://127.0.0.1:8080` on the Docker host.
-  Cloudflared uses `http://app:8081` over the Compose network and exposes the
-  same routes on the configured public HTTPS hostname.
+## Required Files
 
-## Production setup
+Create these local deployment files from the tracked examples:
 
-From the repository root, create the local deployment files.
-
-```sh
+```bash
 cp .env.example .env
 cp deploy/config/config.container.example.yaml deploy/config/config.container.yaml
 cp deploy/cloudflared/config.yml.example deploy/cloudflared/config.yml
+```
+
+You must also place your Cloudflare Tunnel credentials JSON at:
+
+```bash
+deploy/cloudflared/credentials.json
+```
+
+## Cloudflare Tunnel Credentials
+
+To get the credentials file with the `cloudflared` CLI:
+
+1. Authenticate with Cloudflare:
+
+```bash
+cloudflared tunnel login
+```
+
+2. Create the tunnel if you do not already have one:
+
+```bash
+cloudflared tunnel create dash14
+```
+
+3. List tunnels and note the tunnel ID:
+
+```bash
+cloudflared tunnel list
+```
+
+Cloudflare stores the generated credentials JSON under `~/.cloudflared/<tunnel-id>.json`. Copy that file into the deployment directory as:
+
+```bash
+cp ~/.cloudflared/<tunnel-id>.json deploy/cloudflared/credentials.json
+```
+
+If you already have an existing tunnel, you only need the matching credentials JSON file and tunnel ID.
+
+## Compose Files
+
+The repository now uses two compose entrypoints:
+
+- `docker-compose.yml` is the tracked default for deployment. It expects `DASH14_IMAGE` to be set in `.env`.
+- `docker-compose.dev.yml` is a standalone local-development stack that builds `dash14:local` from source.
+
+The `.env` file is intentionally ignored so each machine can pin its own deployed tag without local edits to the tracked compose file.
+
+Example `.env`:
+
+```dotenv
+DASH14_IMAGE=ghcr.io/smith3v/dash14:v1.2.3
+```
+
+On Synology NAS with Container Manager, point the project at the checked-out repository and use `docker-compose.yml` as the compose file it reads from disk. When you want to roll out a newer release, update `.env` instead of editing the compose file itself.
+
+## App Config
+
+Edit `deploy/config/config.container.yaml` using `deploy/config/config.container.example.yaml` as the template for the container layout used by the compose stack.
+
+These paths match the current image and compose wiring:
+
+- `./runtime/data` -> `/data`
+- `./runtime/out` -> `/out`
+- `./runtime/logs` -> `/logs`
+- templates are baked into the image at `/app/templates`
+
+Set `telegram.token` and keep `http.listen_address: "0.0.0.0:8081"` so Docker and Cloudflared can reach the app.
+
+Set all four overlay template paths in `deploy/config/config.container.yaml`:
+
+- `overlay.planned_template_path: /app/templates/planned.html.tmpl`
+- `overlay.live_template_path: /app/templates/live.html.tmpl`
+- `overlay.intermission_template_path: /app/templates/intermission.html.tmpl`
+- `overlay.finished_template_path: /app/templates/finished.html.tmpl`
+
+The generated files are static exports for inspection:
+
+- `/out/overlay.html` for the main overlay
+- `/out/intermission.html` for the standalone scoreboard
+
+Use the HTTP URLs in OBS for live updates.
+
+## Cloudflare Config
+
+Edit `deploy/cloudflared/config.yml`:
+
+- set `tunnel` to your real tunnel ID
+- keep `credentials-file` as `/etc/cloudflared/credentials.json`
+- change `hostname` to the domain or subdomain that should serve the overlay
+
+The tunnel should point to the app:
+
+```yaml
+service: http://app:8081
+```
+
+Create the Cloudflare DNS route for that hostname:
+
+```bash
+cloudflared tunnel route dns <tunnel-id> <overlay.example.com>
+```
+
+Replace `<tunnel-id>` and `<overlay.example.com>` with the values configured in `deploy/cloudflared/config.yml`.
+
+## Start The Stack
+
+Create the runtime directories once and give the image's `dash14` user write access:
+
+```bash
 mkdir -p runtime/data runtime/out runtime/logs
 ```
 
-1. Pin a release image in `.env`. Set the production Telegram token in the
-   mounted app config and keep `http.listen_address: "0.0.0.0:8081"`.
-2. Set the tunnel ID and public hostname in `deploy/cloudflared/config.yml`.
-   Place the tunnel credentials JSON at `deploy/cloudflared/credentials.json`.
-   For a new locally managed tunnel, use `cloudflared tunnel login`,
-   `cloudflared tunnel create <name>`, and
-   `cloudflared tunnel route dns <name> <overlay-hostname>`.
-3. Start the stack and inspect both services.
+Set the image tag in `.env`, then start the deployment:
 
-   ```sh
-   docker compose config --quiet
-   docker compose pull
-   docker compose up -d
-   docker compose ps
-   docker compose logs app cloudflared
-   ```
-
-On Synology Container Manager, point the project at the repository checkout
-and use the same `docker-compose.yml`.
-
-## Verify the deployment
-
-```sh
-curl -fsS http://127.0.0.1:8080/overlay.html
-curl -fsS http://127.0.0.1:8080/intermission.html
-curl -fsS http://127.0.0.1:8080/api/v1/game
+```bash
+docker compose up -d
 ```
 
-Repeat the checks on the public HTTPS hostname. Check that the pages and API
-send `Cache-Control: no-store` and that custom Cloudflare cache rules honor it.
-A fresh database serves transparent overlay pages and reports `game: null`
-until a match is planned.
+For local development, see [Local testing with a Telegram test bot](#local-testing-with-a-telegram-test-bot).
+
+The app serves the overlays on the local Compose endpoint at:
+
+- `http://127.0.0.1:8080/overlay.html`
+- `http://127.0.0.1:8080/intermission.html`
+
+Cloudflare Tunnel publishes those through the configured hostname.
 
 ## Upgrade from the Nginx stack
 
-1. Record the current checkout and image tag. Back up the database using
-   SQLite's backup command or with the app stopped. Also back up the managed
-   logos and the mounted app and tunnel configs.
-2. Stop the legacy `nginx` service with `docker compose stop nginx` from the
-   previous checkout to free host port `8080`.
-3. Switch the checkout to the release containing the HTTP overlay and pin its
-   image tag in `.env`. Add `http.listen_address: "0.0.0.0:8081"` to the mounted
-   app config, keeping the existing runtime directories.
-4. Set the overlay hostname's service in the mounted tunnel config to
-   `http://app:8081`. Keep the existing hostname, tunnel ID, credentials path,
-   and catch-all rule.
-5. Run `docker compose config --quiet`, `docker compose pull app`, and
+1. Record the current checkout and image tag, and back up the runtime data and configs.
+2. Run `docker compose stop nginx` from the previous checkout to free port `8080`.
+3. Check out the new release, update the image tag in `.env`, add
+   `http.listen_address: "0.0.0.0:8081"` to the mounted app config, and change the
+   mounted tunnel origin to `http://app:8081`.
+4. Run `docker compose pull app` and
    `docker compose up -d --remove-orphans --force-recreate app cloudflared`.
-   Verify the deployment and refresh the existing OBS sources.
+   Verify the deployment and refresh the OBS sources.
 
-To roll back, stop the new stack and restore the prior checkout, image pin,
-and both mounted configs. The legacy image expects its original app config.
-Run `docker compose up -d --remove-orphans` from the restored checkout, verify
-both overlay URLs, and refresh the OBS sources.
+To roll back, stop the new stack, restore the previous checkout, image pin,
+and both mounted configs, then run `docker compose up -d --remove-orphans`.
 
-## Production team import
+## Verification
 
-Run the existing one-shot import against the mounted production data.
+After bringing the stack up, run:
 
-```sh
-docker compose run --rm -w /workspace -v "$PWD:/workspace:ro" app \
-  --config /config/config.yaml --import /workspace/teams/teams.yaml
+```bash
+docker compose ps
+docker compose logs app
+docker compose logs cloudflared
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/overlay.html
+curl http://127.0.0.1:8080/intermission.html
+curl http://127.0.0.1:8080/api/v1/game
 ```
 
-The SQLite database and imported logos are under `runtime/data`. Static HTML
-exports are under `runtime/out`. Use the HTTP URLs for live updates.
+Repeat the HTTP checks on the public HTTPS hostname after starting the tunnel.
+
+For local validation of the deployment assets before rollout, run:
+
+```bash
+go test ./...
+docker compose config
+docker compose -f docker-compose.dev.yml config
+```
+
+## Team Import In Containers
+
+To import teams and logos with the containerized app, mount the source YAML and logo files into the app container and run the one-shot import mode:
+
+```bash
+docker compose run --rm \
+  -w /workspace \
+  -v "$PWD:/workspace:ro" \
+  app \
+  --config /config/config.yaml \
+  --import /workspace/teams/teams.yaml
+```
+
+Imported logos are copied into `/data/logos`, which persists on the host under `runtime/data/logos`.
+
+## Persistence And Backups
+
+Back up these paths on the Docker host:
+
+- `runtime/data/dash14.db` for SQLite state, using SQLite's backup command or with the app stopped
+- `runtime/data/logos/` for imported team logos
+- `runtime/logs/` if you want to retain logs
+- `deploy/config/config.container.yaml` for the app configuration
+- `deploy/cloudflared/credentials.json` and `deploy/cloudflared/config.yml` for tunnel access
+
+If you move the deployment to another machine, those files are the state you need to bring with it.
+
+## OBS Wiring
+
+Use two OBS Browser Sources in URL mode:
+
+- `overlay.html` for normal match presentation
+- `intermission.html` for pre-match and between-set scenes
+
+Both pages update scores in place, including partial scores in the active set. The main overlay reloads once when it switches layouts. The standalone intermission page keeps its document across match phases.
 
 ## Local testing with a Telegram test bot
 
-From the repository root, create a local config and writable runtime paths.
-If the example file is missing, check out the branch or release containing
-the HTTP overlay update.
+From the repository root, prepare the ignored dev config and isolated runtime directories:
 
-```sh
+```bash
 cp deploy/config/config.dev.example.yaml deploy/config/config.dev.yaml
 mkdir -p runtime/dev/data runtime/dev/out
 export DASH14_DEV_UID="$(id -u)" DASH14_DEV_GID="$(id -g)"
 ```
 
-Set `telegram.token` in the ignored dev config to a dedicated test bot's token.
-Use a fresh bot so only the test instance receives its updates. Keep
-`http.listen_address: "0.0.0.0:8081"` in the dev config. The container listens
-on port `8081` and Compose publishes it on host loopback port `8080`. Stop any
-other local stack using host port `8080`.
+Set `telegram.token` in the dev config to your test bot's token. Free host
+port `8080` if another local stack is using it, then start the app and import
+the teams and logos:
 
-```sh
+```bash
 make compose-dev-up
 docker compose -f docker-compose.dev.yml run --rm app \
   --config /config/config.yaml --import /workspace/teams/teams.yaml
-```
-
-The one-shot import initializes the SQLite schema if needed and loads the
-team catalog and logos into `runtime/dev/data`. Run it again when updating the
-catalog. Verify the import before planning a match.
-
-```sh
 sqlite3 -readonly runtime/dev/data/dash14.db 'SELECT count(*) FROM teams;'
 ```
 
-Send `/start` to the test bot in a private chat. List registered users and grant
-your Telegram ID admin rights in the isolated database.
+Send `/start` to the test bot, then grant your Telegram user admin rights in the dev database:
 
-```sh
-sqlite3 runtime/dev/data/dash14.db 'SELECT telegram_user_id, is_admin FROM users;'
+```bash
+sqlite3 runtime/dev/data/dash14.db 'SELECT telegram_user_id FROM users;'
 sqlite3 runtime/dev/data/dash14.db \
   'UPDATE users SET is_admin = 1 WHERE telegram_user_id = 123456789;'
 ```
 
-1. Open `http://127.0.0.1:8080/overlay.html` and
-   `http://127.0.0.1:8080/intermission.html` in a browser and add the same URLs as
-   OBS Browser Sources. On a fresh database, both pages are transparent before
-   the first match and the API reports `game: null`.
-2. Use `/plan` to select two teams, then `/game` to open the controls. Start the
-   game, add a point to each side, and undo back to 0–0. Both pages should
-   update within about two seconds and keep the same document. The standalone
-   history row appears on the first point and disappears when both scores
-   return to zero.
-3. Finish a set, start the next one, and complete the match. In browser DevTools,
-   preserve the Network log and filter for Document requests. The main overlay
-   should navigate once on each layout change. The standalone intermission page
-   should keep its document and display the latest set history. Check the same
-   transitions visually in OBS.
-4. Edit the active template. The dev stack checks templates every second, and
-   the affected page adopts the change on its next poll. Add `?updates=off` to
-   freeze a page for inspection. Rebuild with `make compose-dev-up` after editing
-   Go or the embedded updater.
+Open both overlay URLs in a browser or OBS. Use `/plan` and `/game` to start
+a match. Add and undo a point to check in-place updates, then finish a set
+to check that only the main overlay reloads. The dev stack reloads edited
+templates automatically. Add `?updates=off` to freeze an overlay for inspection.
 
-`make compose-dev-logs` follows the app logs. `make compose-dev-down` stops the
-stack and preserves `runtime/dev`.
+`make compose-dev-logs` shows app logs. `make compose-dev-down` stops the stack
+and preserves `runtime/dev`.
