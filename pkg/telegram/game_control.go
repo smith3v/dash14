@@ -149,7 +149,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			if phase != storage.GamePhasePlanned {
 				return nil
 			}
-			gState, setState, err := game2.StartPlannedGame(toGameState(txGame))
+			gState, setState, err := game2.StartPlannedGame(toGameState(txGame, phase))
 			if err != nil {
 				return err
 			}
@@ -169,7 +169,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			if phase != storage.GamePhaseBetweenSets {
 				return nil
 			}
-			gState, setState, err := game2.StartNextSet(toGameState(txGame))
+			gState, setState, err := game2.StartNextSet(toGameState(txGame, phase))
 			if err != nil {
 				return err
 			}
@@ -231,7 +231,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 				},
 				IsFinished: txActiveSet.IsFinished,
 			}
-			res, err := game2.ConfirmSetFinished(toGameState(txGame), setState)
+			res, err := game2.ConfirmSetFinished(toGameState(txGame, phase), setState)
 			if err != nil {
 				return err
 			}
@@ -246,7 +246,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			if phase != storage.GamePhaseBetweenSets {
 				return nil
 			}
-			res, err := game2.ConfirmGameFinished(toGameState(txGame))
+			res, err := game2.ConfirmGameFinished(toGameState(txGame, phase))
 			if err != nil {
 				return err
 			}
@@ -254,7 +254,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			return repo.SaveGame(txGame)
 
 		case "game:reverse":
-			res := game2.ReverseOverlaySides(toGameState(txGame))
+			res := game2.ReverseOverlaySides(toGameState(txGame, phase))
 			applyGameState(txGame, res.Game)
 			return repo.SaveGame(txGame)
 
@@ -412,12 +412,12 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 			{Text: "Finish the set", CallbackData: "game:set:finish"},
 		})
 	}
-	if phase == storage.GamePhaseBetweenSets && !game2.IsGameFinishEligible(toGameState(game)) {
+	if phase == storage.GamePhaseBetweenSets && !game2.IsGameFinishEligible(toGameState(game, phase)) {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Start next set", CallbackData: "game:set:start_next"},
 		})
 	}
-	if phase == storage.GamePhaseBetweenSets && game2.IsGameFinishEligible(toGameState(game)) {
+	if phase == storage.GamePhaseBetweenSets && game2.IsGameFinishEligible(toGameState(game, phase)) {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: "Finish the game", CallbackData: "game:finish"},
 		})
@@ -463,7 +463,7 @@ func (r *Router) loadControlContext() (*storage.Game, *storage.Team, *storage.Te
 	return game, home, guest, activeSet, nil
 }
 
-func toGameState(g *storage.Game) game2.GameState {
+func toGameState(g *storage.Game, phase storage.GamePhase) game2.GameState {
 	return game2.GameState{
 		HomeTeamID:         g.HomeTeamID,
 		GuestTeamID:        g.GuestTeamID,
@@ -473,7 +473,7 @@ func toGameState(g *storage.Game) game2.GameState {
 		GuestSetsWon:       g.GuestSetsWon,
 		CurrentSetNumber:   g.CurrentSetNumber,
 		Status:             string(g.Status),
-		Phase:              string(g.Phase),
+		Phase:              string(phase),
 		SideSwitchedInSet5: g.SideSwitchedInSet5,
 	}
 }
@@ -485,7 +485,6 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.GuestSetsWon = src.GuestSetsWon
 	dst.CurrentSetNumber = src.CurrentSetNumber
 	dst.Status = storage.GameStatus(src.Status)
-	dst.Phase = storage.GamePhase(src.Phase)
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
