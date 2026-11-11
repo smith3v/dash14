@@ -830,9 +830,6 @@ func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.i
 func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
 }
-func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
-	return g.inner.ListSetsByGameID(gameID)
-}
 func (g *saveFailGames) SaveGame(game *storage.Game) error  { return g.inner.SaveGame(game) }
 func (g *saveFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 

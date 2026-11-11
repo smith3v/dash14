@@ -163,25 +163,16 @@ func (web *Web) Export() error {
 	}
 	for name := range snapshot.logos {
 		if isLogoName(name) {
-			if _, err := web.renderer.publishLogo(name); err != nil {
+			if err := web.renderer.publishLogo(name); err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := writeOverlay(web.renderer.cfg.OutputPath, func(file *os.File) error {
-		_, err := file.Write(snapshot.main)
-		return err
-	}); err != nil {
+	if err := writeOverlay(web.renderer.cfg.OutputPath, snapshot.main); err != nil {
 		return err
 	}
-	if err := writeOverlay(web.renderer.intermissionOutputPath(), func(file *os.File) error {
-		_, err := file.Write(snapshot.intermission)
-		return err
-	}); err != nil {
-		return err
-	}
-	return nil
+	return writeOverlay(web.renderer.intermissionOutputPath(), snapshot.intermission)
 }
 
 func (web *Web) store(snapshot webSnapshot, state gameResponse) error {

@@ -221,7 +221,7 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		t.Fatalf("create game: %v", err)
 	}
 
-	renderer := overlay.NewRenderer(config.OverlayConfig{
+	renderer, err := overlay.OpenRenderer(config.OverlayConfig{
 		PlannedTemplatePath:      plannedTpl,
 		LiveTemplatePath:         liveTpl,
 		IntermissionTemplatePath: intermissionTpl,
@@ -230,9 +230,13 @@ func TestOverlayRefreshLoopRerendersCurrentOverlayAfterTemplateReload(t *testing
 		LogoDir:                  filepath.Join(dir, "logos"),
 	})
 
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	publisher := newOverlayPublisher(db, renderer)
 	if err := publisher.publish(context.Background(), slog.Default()); err != nil {
-		t.Fatalf("initial renderCurrentOverlay: %v", err)
+		t.Fatalf("initial overlay publication: %v", err)
 	}
 
 	data, err := os.ReadFile(outputPath)

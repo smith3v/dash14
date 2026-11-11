@@ -50,9 +50,6 @@ func (g *txFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inn
 func (g *txFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
 }
-func (g *txFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
-	return g.inner.ListSetsByGameID(gameID)
-}
 func (g *txFailGames) SaveGame(game *storage.Game) error  { return g.inner.SaveGame(game) }
 func (g *txFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 
@@ -61,7 +58,6 @@ type fakeOverlayRenderer struct {
 	planned      []overlay.PlannedViewModel
 	live         []overlay.LiveViewModel
 	intermission []overlay.IntermissionViewModel
-	finished     []overlay.FinishedViewModel
 }
 
 func (f *fakeOverlayRenderer) RenderPlanned(vm overlay.PlannedViewModel) error {
@@ -82,20 +78,6 @@ func (f *fakeOverlayRenderer) RenderIntermission(vm overlay.IntermissionViewMode
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.intermission = append(f.intermission, vm)
-	return nil
-}
-
-func (f *fakeOverlayRenderer) RenderIntermissionMain(vm overlay.IntermissionViewModel) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.intermission = append(f.intermission, vm)
-	return nil
-}
-
-func (f *fakeOverlayRenderer) RenderFinished(vm overlay.FinishedViewModel) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.finished = append(f.finished, vm)
 	return nil
 }
 
@@ -121,12 +103,6 @@ func (f *fakeOverlayRenderer) intermissionCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.intermission)
-}
-
-func (f *fakeOverlayRenderer) finishedCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.finished)
 }
 
 func (f *fakeOverlayRenderer) lastIntermission() overlay.IntermissionViewModel {

@@ -1,40 +1,23 @@
 package overlay
 
 import (
-	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/smith3v/dash14/pkg/config"
 )
 
-// Renderer renders overlay HTML files from Go templates. Output is written
-// atomically: the rendered content is first written to a temp file in the
-// same directory as the output file, then renamed into place. This prevents
-// OBS from reading a partially written file.
+// Renderer loads and caches the templates used to publish the overlay pages.
 type Renderer struct {
-	cfg             config.OverlayConfig
-	mu              sync.RWMutex
-	templates       rendererTemplates
-	refreshInterval time.Duration
-	refreshOnce     sync.Once
-}
-
-// NewRenderer creates a Renderer configured with the provided overlay config.
-func NewRenderer(cfg config.OverlayConfig) *Renderer {
-	renderer, err := OpenRenderer(cfg)
-	if err != nil {
-		panic(err)
-	}
-	return renderer
+	cfg       config.OverlayConfig
+	mu        sync.RWMutex
+	templates rendererTemplates
 }
 
 // OpenRenderer loads all overlay templates before constructing the renderer.
@@ -44,9 +27,8 @@ func OpenRenderer(cfg config.OverlayConfig) (*Renderer, error) {
 		return nil, err
 	}
 	return &Renderer{
-		cfg:             cfg,
-		templates:       templates,
-		refreshInterval: time.Duration(cfg.TemplateCacheRefreshIntervalSeconds) * time.Second,
+		cfg:       cfg,
+		templates: templates,
 	}, nil
 }
 
@@ -99,37 +81,6 @@ func loadRendererTemplates(cfg config.OverlayConfig) (rendererTemplates, error) 
 	}, nil
 }
 
-// StartTemplateRefresh starts the optional background template refresh loop.
-// A zero refresh interval means the in-memory template cache stays fixed for
-// the lifetime of the process after the initial load.
-func (r *Renderer) StartTemplateRefresh(ctx context.Context, logger *slog.Logger) {
-	if r.refreshInterval <= 0 {
-		return
-	}
-	r.refreshOnce.Do(func() {
-		go r.refreshLoop(ctx, logger)
-	})
-}
-
-func (r *Renderer) refreshLoop(ctx context.Context, logger *slog.Logger) {
-	ticker := time.NewTicker(r.refreshInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := r.RefreshTemplates(); err != nil {
-				if logger != nil {
-					logger.Error("overlay template refresh failed", "err", err)
-				}
-				continue
-			}
-		}
-	}
-}
-
 // RefreshTemplates reloads the renderer template snapshot from disk and swaps
 // it in atomically only after all template files parse successfully.
 func (r *Renderer) RefreshTemplates() error {
@@ -149,60 +100,7 @@ func (r *Renderer) templateSnapshot() rendererTemplates {
 	return r.templates
 }
 
-// RenderPlanned renders the cached planned template to the configured output
-// path.
-func (r *Renderer) RenderPlanned(vm PlannedViewModel) error {
-	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
-		return err
-	}
-	return r.renderToPath(r.templateSnapshot().planned, vm, r.cfg.OutputPath)
-}
-
-// RenderLive renders the cached live template to the configured output path.
-func (r *Renderer) RenderLive(vm LiveViewModel) error {
-	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
-		return err
-	}
-	return r.renderToPath(r.templateSnapshot().live, vm, r.cfg.OutputPath)
-}
-
-// RenderIntermission renders the cached intermission template to the derived
-// intermission output path.
-func (r *Renderer) RenderIntermission(vm IntermissionViewModel) error {
-	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
-		return err
-	}
-	return r.renderToPath(r.templateSnapshot().intermission, vm, r.intermissionOutputPath())
-}
-
-// RenderIntermissionMain renders the cached intermission template to the main
-// overlay output path. This is used when the between-set screen should replace
-// the normal live overlay without changing OBS scenes.
-func (r *Renderer) RenderIntermissionMain(vm IntermissionViewModel) error {
-	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
-		return err
-	}
-	return r.renderToPath(r.templateSnapshot().intermission, vm, r.cfg.OutputPath)
-}
-
-// RenderFinished renders the cached finished template to the configured main
-// overlay output path.
-func (r *Renderer) RenderFinished(vm FinishedViewModel) error {
-	if err := r.publishLogos(&vm.HomeTeamLogoPath, &vm.GuestTeamLogoPath); err != nil {
-		return err
-	}
-	return r.renderToPath(r.templateSnapshot().finished, vm, r.cfg.OutputPath)
-}
-
-// renderToPath executes tmpl with data and writes the result atomically to
-// outputPath.
-func (r *Renderer) renderToPath(tmpl *template.Template, data any, outputPath string) error {
-	return writeOverlay(outputPath, func(file *os.File) error {
-		return tmpl.Execute(file, data)
-	})
-}
-
-func writeOverlay(outputPath string, write func(*os.File) error) error {
+func writeOverlay(outputPath string, content []byte) error {
 	outDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("overlay: create output directory: %w", err)
@@ -222,7 +120,7 @@ func writeOverlay(outputPath string, write func(*os.File) error) error {
 		}
 	}()
 
-	if err = write(tmp); err != nil {
+	if _, err = tmp.Write(content); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("overlay: write output: %w", err)
 	}
@@ -243,49 +141,29 @@ func (r *Renderer) intermissionOutputPath() string {
 	return filepath.Join(filepath.Dir(r.cfg.OutputPath), "intermission.html")
 }
 
-func (r *Renderer) publishLogos(homeLogoPath, guestLogoPath *string) error {
-	var err error
-	*homeLogoPath, err = r.publishLogo(*homeLogoPath)
-	if err != nil {
-		return err
-	}
-	*guestLogoPath, err = r.publishLogo(*guestLogoPath)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *Renderer) publishLogo(filename string) (string, error) {
-	if filename == "" {
-		return "", nil
-	}
-
+func (r *Renderer) publishLogo(filename string) error {
 	sourcePath := filepath.Join(r.cfg.LogoDir, filename)
 	info, err := os.Stat(sourcePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("overlay: logo source %q not found", sourcePath)
+			return fmt.Errorf("overlay: logo source %q not found", sourcePath)
 		}
-		return "", fmt.Errorf("overlay: stat logo source %q: %w", sourcePath, err)
+		return fmt.Errorf("overlay: stat logo source %q: %w", sourcePath, err)
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("overlay: logo source %q is a directory", sourcePath)
+		return fmt.Errorf("overlay: logo source %q is a directory", sourcePath)
 	}
 
 	destPath := filepath.Join(filepath.Dir(r.cfg.OutputPath), filename)
 	same, err := sameFile(sourcePath, destPath)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if same {
-		return filename, nil
+		return nil
 	}
 
-	if err := copyFileAtomically(sourcePath, destPath); err != nil {
-		return "", err
-	}
-	return filename, nil
+	return copyFileAtomically(sourcePath, destPath)
 }
 
 func sameFile(pathA, pathB string) (bool, error) {
