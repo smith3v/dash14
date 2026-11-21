@@ -227,6 +227,8 @@ database under `/data` so the service can read the database and its WAL
 files through the shared mount. The first snapshot runs when the database
 is available. The service takes another once the latest snapshot is 24 hours
 old, including after a restart. It retries failures after one minute.
+The image starts `schedule.sh`, which checks once a minute and calls
+`backup.sh` when a snapshot is due.
 
 Snapshots are verified before publication and kept in `runtime/backups/` for
 14 days. The service prunes expired snapshots after a successful backup.
@@ -235,7 +237,7 @@ For an existing deployment, start the new service with
 find its filename, run:
 
 ```bash
-docker compose exec db-backup sh /usr/local/bin/dash14-backup once
+docker compose exec db-backup sh /usr/local/bin/dash14-backup
 ```
 
 To restore, set `snapshot` to the filename you want to check:
