@@ -67,7 +67,7 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 
-	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
+	view := r.gameControlView(game, home, guest, activeSet, update.Message.Chat.Type == models.ChatTypePrivate)
 	msg, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        view.Text,
@@ -78,9 +78,9 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 
-	game.CurrentAdminUserID = userID
-	game.ControlMessageID = msg.ID
-	if err := r.games.SaveGame(game); err != nil {
+	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+		return repo.SetGameControl(game, userID, chatID, msg.ID)
+	}); err != nil {
 		r.logger.ErrorContext(ctx, "handleGame: save game failed", "game_id", game.ID, "err", err)
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
@@ -114,7 +114,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	if err != nil || game == nil {
 		return
 	}
-	if game.ControlMessageID == 0 || messageID != game.ControlMessageID {
+	if !isControlMessage(game, chatID, messageID) {
 		_, _ = r.client.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: cb.ID,
 			Text:            "This control message is stale. Run /game.",
@@ -135,12 +135,13 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if err != nil {
 			return err
 		}
-		txActiveSet, err := repo.GetActiveSet(game.ID)
+		if txGame.Status == storage.GameStatusFinished || txGame.CurrentAdminUserID != userID ||
+			!isControlMessage(txGame, chatID, messageID) {
+			return errStaleGameControl
+		}
+		txActiveSet, err := findActiveSet(repo, game.ID)
 		if err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-			txActiveSet = nil
+			return err
 		}
 		phase := txGame.EffectivePhase(txActiveSet != nil && !txActiveSet.IsFinished)
 
@@ -185,38 +186,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 				IsFinished: false,
 			})
 
-		case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
+		case scoreHomeUp, scoreHomeDown, scoreGuestUp, scoreGuestDown:
 			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
 				return nil
 			}
-			score := game2.SetScore{
-				HomeScore:          txActiveSet.HomeScore,
-				GuestScore:         txActiveSet.GuestScore,
-				SetNumber:          txActiveSet.SetNumber,
-				SideSwitchedInSet5: txGame.SideSwitchedInSet5,
-			}
-			var result game2.ScoreResult
-			switch data {
-			case "game:home:+1":
-				result = game2.IncrementHome(score)
-			case "game:home:-1":
-				result = game2.DecrementHome(score)
-			case "game:guest:+1":
-				result = game2.IncrementGuest(score)
-			case "game:guest:-1":
-				result = game2.DecrementGuest(score)
-			}
-
-			txActiveSet.HomeScore = result.Set.HomeScore
-			txActiveSet.GuestScore = result.Set.GuestScore
-			if err := repo.SaveSet(txActiveSet); err != nil {
-				return err
-			}
-			if result.SideSwitch {
-				txGame.HomeTeamSide, txGame.GuestTeamSide = txGame.GuestTeamSide, txGame.HomeTeamSide
-			}
-			txGame.SideSwitchedInSet5 = result.Set.SideSwitchedInSet5
-			return repo.SaveGame(txGame)
+			return saveScoringAction(repo, txGame, txActiveSet, data)
 
 		case "game:set:finish":
 			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
@@ -253,16 +227,21 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			applyGameState(txGame, res.Game)
 			return repo.SaveGame(txGame)
 
-		case "game:reverse":
-			res := game2.ReverseOverlaySides(toGameState(txGame, phase))
-			applyGameState(txGame, res.Game)
-			return repo.SaveGame(txGame)
+		case switchSides:
+			return saveScoringAction(repo, txGame, txActiveSet, data)
 
 		default:
 			return errUnhandledGameCallback
 		}
 	})
 	if errors.Is(err, errUnhandledGameCallback) {
+		return
+	}
+	if errors.Is(err, errStaleGameControl) {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   "This control message is stale. Run /game.",
+		})
 		return
 	}
 	if err != nil {
@@ -306,10 +285,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 				game.GuestSetsWon,
 			)
 		}
-	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
-		if activeSet != nil {
-			broadcastText = formatBroadcastScore(game, home, guest, activeSet)
-		}
+	case scoreHomeUp, scoreHomeDown, scoreGuestUp, scoreGuestDown, switchSides:
+		broadcastText = scoringBroadcast(data, game, home, guest, activeSet)
 	case "game:finish":
 		broadcastText = fmt.Sprintf(
 			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
@@ -318,20 +295,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			game.GuestSetsWon,
 			guest.Name,
 		)
-	case "game:reverse":
-		broadcastText = fmt.Sprintf("Overlay sides reversed for %s vs %s", home.Name, guest.Name)
 	}
-	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
-	_, editErr := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
-		ChatID:      chatID,
-		MessageID:   game.ControlMessageID,
-		Text:        view.Text,
-		ReplyMarkup: view.Keyboard,
-	})
-	if editErr != nil {
-		r.logger.ErrorContext(ctx, "handleGameCallback: edit control message failed",
-			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
-	}
+	r.editGameControl(ctx, game.ID, chatID, cb.Message.Message.Chat.Type == models.ChatTypePrivate)
 
 	if strings.TrimSpace(broadcastText) != "" {
 		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
@@ -445,19 +410,12 @@ func (r *Router) loadControlContext() (*storage.Game, *storage.Team, *storage.Te
 	if game == nil {
 		return nil, nil, nil, nil, nil
 	}
-	home, err := r.teams.GetTeamByID(game.HomeTeamID)
+	home, guest, err := r.loadGameTeams(game)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	guest, err := r.teams.GetTeamByID(game.GuestTeamID)
+	activeSet, err := findActiveSet(r.games, game.ID)
 	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	activeSet, err := r.games.GetActiveSet(game.ID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return game, home, guest, nil, nil
-		}
 		return nil, nil, nil, nil, err
 	}
 	return game, home, guest, activeSet, nil

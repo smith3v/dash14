@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestRunWithDepsImportModeExitsAfterImport(t *testing.T) {
 	telegramStarted := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		telegramStarted = true
 		return func(context.Context) {}, nil
 	}
@@ -142,7 +143,7 @@ func TestRunWithDepsRuntimeRendersOverlayBeforeTelegramStart(t *testing.T) {
 	sawRenderedIntermission := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {
 			telegramStarted = true
 			if _, err := os.Stat(outputPath); err == nil {
@@ -337,7 +338,7 @@ func TestRunWithDepsRuntimeRejectsMissingIntermissionTemplate(t *testing.T) {
 	telegramStarted := false
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {
 			telegramStarted = true
 		}, nil
@@ -440,7 +441,7 @@ func TestRunWithDepsRuntimeIntermissionOmitsUnstartedNextSet(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -538,7 +539,7 @@ func TestRunWithDepsRuntimeRendersBetweenSetsOnMainOverlay(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -629,7 +630,7 @@ func TestRunWithDepsRuntimeRestoresPlannedGameAfterMigration(t *testing.T) {
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 
@@ -736,7 +737,7 @@ func TestRunWithDepsRuntimeRestoresFinishedGameWithoutCurrentMatch(t *testing.T)
 
 	deps := defaultRuntimeDeps()
 	deps.loadConfig = func(string) (config.Config, error) { return cfg, nil }
-	deps.newTelegram = func(string, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func()) (func(context.Context), error) {
+	deps.newTelegram = func(config.TelegramConfig, *slog.Logger, *storage.UserRepository, *storage.TeamRepository, *storage.GameRepository, func(), *http.ServeMux) (func(context.Context), error) {
 		return func(context.Context) {}, nil
 	}
 

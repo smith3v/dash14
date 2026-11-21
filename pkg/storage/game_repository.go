@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrPlannedGameChanged indicates that a guarded planned-game replacement no
@@ -70,6 +71,7 @@ func (r *GameRepository) ReplacePlannedGame(
 			"status":                GameStatusPlanned,
 			"current_admin_user_id": adminUserID,
 			"control_message_id":    0,
+			"control_chat_id":       0,
 			"side_switched_in_set5": false,
 		})
 	if result.Error != nil {
@@ -168,4 +170,55 @@ func (r *GameRepository) SaveSet(set *GameSet) error {
 		return fmt.Errorf("storage: save set %d: %w", set.ID, err)
 	}
 	return nil
+}
+
+// SetGameControl changes only the control metadata, provided the expected
+// game and owner still match. A score saved during /game is left intact.
+func (r *GameRepository) SetGameControl(expected *Game, adminID, chatID int64, messageID int) error {
+	result := r.db.Model(&Game{}).
+		Where("id = ? AND status <> ? AND current_admin_user_id = ? AND home_team_id = ? AND guest_team_id = ?",
+			expected.ID, GameStatusFinished, expected.CurrentAdminUserID, expected.HomeTeamID, expected.GuestTeamID).
+		Updates(map[string]any{
+			"current_admin_user_id": adminID,
+			"control_message_id":    messageID,
+			"control_chat_id":       chatID,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("storage: set game control: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("storage: game control changed: %w", gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+// RecordScoringRequest reserves a request ID in the same transaction as its
+// scoring action. If it already exists, it returns the committed action.
+func (r *GameRepository) RecordScoringRequest(setID uint, requestID, action string) (previous string, err error) {
+	request := scoringRequest{SetID: setID, RequestID: requestID, Action: action}
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&request)
+	if result.Error != nil {
+		return "", fmt.Errorf("storage: record scoring request: %w", result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return "", nil
+	}
+	if err := r.db.Where("set_id = ? AND request_id = ?", setID, requestID).Take(&request).Error; err != nil {
+		return "", fmt.Errorf("storage: read scoring request: %w", err)
+	}
+	return request.Action, nil
+}
+
+// GetGameTeams reads both teams using the same database snapshot as the game.
+func (r *GameRepository) GetGameTeams(game *Game) (*Team, *Team, error) {
+	teams := NewTeamRepository(r.db)
+	home, err := teams.GetTeamByID(game.HomeTeamID)
+	if err != nil {
+		return nil, nil, err
+	}
+	guest, err := teams.GetTeamByID(game.GuestTeamID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return home, guest, nil
 }

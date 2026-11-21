@@ -32,6 +32,8 @@ type Router struct {
 	teams               *storage.TeamRepository
 	games               GameStore
 	gameChanged         func()
+	scoringPanelURL     string
+	controlEditMu       sync.Mutex
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
 	broadcastQueueSize  int
 	broadcastJobs       chan broadcastJob

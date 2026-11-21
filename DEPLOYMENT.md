@@ -105,6 +105,12 @@ These paths match the current image and compose wiring:
 
 Set `telegram.token` and keep `http.listen_address: "0.0.0.0:8081"` so Docker and Cloudflared can reach the app.
 
+To enable the Telegram scoring panel, set `telegram.scoring_panel_url` to the
+public HTTPS address of the same app, for example
+`https://overlay.example.com/scoring`. The tunnel terminates HTTPS and routes the
+panel and overlay to the same Go listener. Restart the app and open `/game` in
+the operator’s private chat with the bot.
+
 Set all four overlay template paths in `deploy/config/config.container.yaml`:
 
 - `overlay.planned_template_path: /app/templates/planned.html.tmpl`

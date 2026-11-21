@@ -12,7 +12,7 @@ type Config struct {
 	Logging  LoggingConfig  `yaml:"logging"`
 }
 
-// HTTPConfig controls the address of the read-only overlay server.
+// HTTPConfig controls the listener shared by the overlays and scoring panel.
 type HTTPConfig struct {
 	ListenAddress string `yaml:"listen_address"`
 }
@@ -21,6 +21,9 @@ type HTTPConfig struct {
 type TelegramConfig struct {
 	// Token is the bot token issued by BotFather. Required for runtime mode.
 	Token string `yaml:"token"`
+
+	// ScoringPanelURL is the public HTTPS URL ending in /scoring.
+	ScoringPanelURL string `yaml:"scoring_panel_url"`
 }
 
 // SQLiteConfig holds the SQLite database path.

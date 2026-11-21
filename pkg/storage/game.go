@@ -79,6 +79,9 @@ type Game struct {
 	// ControlMessageID is the Telegram message ID of the current inline control
 	// panel message. Zero means no control message is active.
 	ControlMessageID int `gorm:"not null;default:0"`
+	// ControlChatID is the chat containing that message. Zero denotes a
+	// legacy or absent control message.
+	ControlChatID int64 `gorm:"not null;default:0"`
 
 	// SideSwitchedInSet5 tracks whether the side switch in the fifth set has
 	// already been applied (it may happen at most once per match).
@@ -113,4 +116,11 @@ type GameSet struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// scoringRequest records a committed Mini App action for retry deduplication.
+type scoringRequest struct {
+	SetID     uint   `gorm:"primaryKey;autoIncrement:false"`
+	RequestID string `gorm:"primaryKey"`
+	Action    string `gorm:"not null"`
 }

@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,6 +42,14 @@ func (c Config) ValidateRuntime() error {
 
 	if c.Telegram.Token == "" {
 		errs = append(errs, errors.New("telegram.token is required"))
+	}
+	if raw := c.Telegram.ScoringPanelURL; raw != "" {
+		panel, err := url.Parse(raw)
+		if err != nil || panel.Scheme != "https" || panel.Hostname() == "" ||
+			panel.User != nil || panel.EscapedPath() != "/scoring" || panel.ForceQuery ||
+			panel.RawQuery != "" || strings.Contains(raw, "#") {
+			errs = append(errs, errors.New("telegram.scoring_panel_url must be a public HTTPS URL ending in /scoring"))
+		}
 	}
 	if c.SQLite.Path == "" {
 		errs = append(errs, errors.New("sqlite.path is required"))

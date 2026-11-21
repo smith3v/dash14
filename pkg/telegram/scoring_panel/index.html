@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dash14 Scoring</title>
+  <link rel="stylesheet" href="/scoring/panel.css">
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <script src="/scoring/panel.js" defer></script>
+</head>
+<body>
+  <main class="panel">
+    <header>
+      <h1 id="set-label">Scoring</h1>
+      <details id="options" hidden>
+        <summary>Options</summary>
+        <button type="button" id="switch-sides">Switch sides</button>
+      </details>
+    </header>
+
+    <section id="teams" aria-label="Team scores" hidden></section>
+
+    <footer>
+      <span id="status" role="status">Connecting to the match…</span>
+      <button type="button" id="retry" hidden>Retry</button>
+    </footer>
+  </main>
+
+  <template id="team-control">
+    <div class="team">
+      <button type="button" class="add" disabled>
+        <span class="name"></span>
+        <strong class="score"></strong>
+        <span class="increment">+1</span>
+      </button>
+      <button type="button" class="subtract" disabled>−1 point</button>
+    </div>
+  </template>
+</body>
+</html>
