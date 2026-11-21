@@ -505,7 +505,22 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	})
 }
 
-func TestGameControlBroadcastTextGeneration(t *testing.T) {
+func waitForScoreboardEdit(t *testing.T, fb *FakeBot, message sentMessage, text string) {
+	t.Helper()
+	waitForCondition(t, "scoreboard edit containing "+text, func() bool {
+		for _, edit := range fb.EditedMessages() {
+			if edit.ChatID == message.ChatID && edit.MessageID == message.MessageID && strings.Contains(edit.Text, text) {
+				if edit.ParseMode != models.ParseModeHTML {
+					t.Fatalf("scoreboard edit parse mode = %q, want HTML", edit.ParseMode)
+				}
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -518,34 +533,45 @@ func TestGameControlBroadcastTextGeneration(t *testing.T) {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 	game := createCurrentPlannedGame(t, store, adminID)
+	home, err := store.teams.GetTeamByID(game.HomeTeamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home.Name = "A&B <Home>"
+	if err := store.teams.UpsertTeam(home); err != nil {
+		t.Fatal(err)
+	}
 
 	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
-	current, _ := store.games.GetGameByID(game.ID)
+	current, err := store.games.GetGameByID(game.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctrlID := current.ControlMessageID
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
+	scoreboard := fb.SentMessages()[1]
+	if scoreboard.ChatID != subID || scoreboard.ParseMode != models.ParseModeHTML ||
+		!strings.Contains(scoreboard.Text, "A&amp;B &lt;Home&gt; <b>0-0</b>") {
+		t.Fatalf("unexpected initial scoreboard: %+v", scoreboard)
+	}
+
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
+	waitForScoreboardEdit(t, fb, scoreboard, "A&amp;B &lt;Home&gt; <b>1-0</b>")
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-correction", "game:home:-1"))
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>0-0</b>")
 
-	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 3)
-	msgs := fb.SentMessages()
-	foundBroadcast := false
-	for _, m := range msgs {
-		if m.ChatID == subID && strings.Contains(m.Text, "Current set: 1") && strings.Contains(m.Text, "Game score") {
-			foundBroadcast = true
-			break
+	for _, edit := range fb.EditedMessages() {
+		if edit.ChatID == adminID {
+			t.Fatalf("current admin received scoreboard edit: %+v", edit)
 		}
 	}
-	if !foundBroadcast {
-		t.Fatal("expected broadcast score update to subscribed user")
-	}
-
-	for _, m := range msgs {
-		if m.ChatID == adminID {
-			t.Fatalf("expected active admin %d to be excluded from broadcasts", adminID)
-		}
+	if got := len(fb.SentMessages()); got != 2 {
+		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
 }
 
-func TestGameControlSetFinishDoesNotBroadcast(t *testing.T) {
+func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -553,7 +579,7 @@ func TestGameControlSetFinishDoesNotBroadcast(t *testing.T) {
 	const adminID int64 = 7307
 	const subID int64 = 7308
 	const chatID int64 = 8307
-	store.createAdminUser(t, adminID, "owner-no-broadcast")
+	store.createAdminUser(t, adminID, "owner-set-finish")
 	if err := store.users.UpsertTelegramUser(subID, "subscriber2", "Subscriber Two"); err != nil {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
@@ -562,7 +588,7 @@ func TestGameControlSetFinishDoesNotBroadcast(t *testing.T) {
 	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
 	current, _ := store.games.GetGameByID(game.ID)
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-no-broadcast", "game:start"))
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-set-finish", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
 	g, err := store.games.GetGameByID(game.ID)
@@ -586,16 +612,16 @@ func TestGameControlSetFinishDoesNotBroadcast(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
-	before := len(fb.SentMessages())
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish-no-broadcast", "game:set:finish"))
-	time.Sleep(100 * time.Millisecond)
-
-	if len(fb.SentMessages()) != before {
-		t.Fatalf("expected no new broadcast on set finish, got %d messages total", len(fb.SentMessages()))
+	scoreboard := fb.SentMessages()[1]
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>25-10</b>")
+	waitForScoreboardEdit(t, fb, scoreboard, "Set 3 finished | Game score: 3-0")
+	if got := len(fb.SentMessages()); got != 2 {
+		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
 }
 
-func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
+func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, renderer := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -635,7 +661,7 @@ func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
-	before := len(fb.SentMessages())
+	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next", "game:set:start_next"))
 
 	g, err = store.games.GetGameByID(game.ID)
@@ -653,12 +679,9 @@ func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
 		t.Fatalf("unexpected active set after start next set: %+v", active)
 	}
 	waitForCondition(t, "live overlay render after next set start", func() bool { return renderer.liveCount() > 0 })
-	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, before+1)
-
-	msgs := fb.SentMessages()
-	last := msgs[len(msgs)-1]
-	if last.ChatID != subID || !strings.Contains(last.Text, "Set 4 started") {
-		t.Fatalf("expected next-set broadcast to subscriber, got chat=%d text=%q", last.ChatID, last.Text)
+	waitForScoreboardEdit(t, fb, scoreboard, "Current set: 4 | Game score: 2-1")
+	if got := len(fb.SentMessages()); got != 2 {
+		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
 }
 
@@ -732,7 +755,7 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 }
 
-func TestGameControlGameFinishBroadcastsSummary(t *testing.T) {
+func TestGameControlGameFinishEditsScoreboard(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
@@ -775,17 +798,11 @@ func TestGameControlGameFinishBroadcastsSummary(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
-	before := len(fb.SentMessages())
+	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
-	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, before+1)
-
-	msgs := fb.SentMessages()
-	last := msgs[len(msgs)-1]
-	if last.ChatID != subID {
-		t.Fatalf("expected final summary broadcast to subscriber, got chat=%d", last.ChatID)
-	}
-	if !strings.Contains(last.Text, "Game finished") || !strings.Contains(last.Text, "4-0") {
-		t.Fatalf("expected final summary broadcast, got %q", last.Text)
+	waitForScoreboardEdit(t, fb, scoreboard, "Game finished\n🏠 Control Home <b>4-0</b>")
+	if got := len(fb.SentMessages()); got != 2 {
+		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
 }
 
