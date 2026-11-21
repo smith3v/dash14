@@ -33,7 +33,7 @@ type GameState struct {
 	GuestSetsWon       int
 	CurrentSetNumber   int
 	Status             string // "planned", "in_progress", "finished"
-	Phase              string // "planned", "set_in_progress", "between_sets", "finished"
+	Phase              string // derived by the caller from status and active-set presence
 	SideSwitchedInSet5 bool   // propagated to SetScore when set 5 starts
 }
 

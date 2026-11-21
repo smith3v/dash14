@@ -46,7 +46,6 @@ func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64)
 		HomeTeamSide:       "left",
 		GuestTeamSide:      "right",
 		Status:             storage.GameStatusPlanned,
-		Phase:              storage.GamePhasePlanned,
 		CurrentSetNumber:   1,
 		CurrentAdminUserID: adminID,
 	}
@@ -145,7 +144,6 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
 	game := &storage.Game{
 		Status:           storage.GameStatusInProgress,
-		Phase:            storage.GamePhaseSetInProgress,
 		CurrentSetNumber: 2,
 		HomeSetsWon:      1,
 		GuestSetsWon:     0,
@@ -170,10 +168,9 @@ func TestGameControlSetInProgressShowsScoreButtons(t *testing.T) {
 	requireNoCallback(t, callbacks, "game:finish")
 }
 
-func TestGameControlIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
+func TestGameControlPlannedShowsStartGame(t *testing.T) {
 	game := &storage.Game{
 		Status:           storage.GameStatusPlanned,
-		Phase:            storage.GamePhaseBetweenSets,
 		CurrentSetNumber: 1,
 	}
 
@@ -191,7 +188,6 @@ func TestGameControlIgnoresStaleStoredPhaseForPlannedGame(t *testing.T) {
 func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
 	game := &storage.Game{
 		Status:           storage.GameStatusInProgress,
-		Phase:            storage.GamePhaseBetweenSets,
 		CurrentSetNumber: 2,
 		HomeSetsWon:      1,
 		GuestSetsWon:     0,
@@ -211,7 +207,6 @@ func TestGameControlBetweenSetsShowsStartNextSet(t *testing.T) {
 func TestGameControlBetweenSetsShowsFinishGameWhenEligible(t *testing.T) {
 	game := &storage.Game{
 		Status:           storage.GameStatusInProgress,
-		Phase:            storage.GamePhaseBetweenSets,
 		CurrentSetNumber: 4,
 		HomeSetsWon:      3,
 		GuestSetsWon:     1,
@@ -295,8 +290,8 @@ func TestGameControlRejectsCallbackWhenControlMessageWasInvalidated(t *testing.T
 	if err != nil {
 		t.Fatalf("GetGameByID after stale callback: %v", err)
 	}
-	if got.Status != storage.GameStatusPlanned || got.Phase != storage.GamePhasePlanned {
-		t.Fatalf("invalidated callback changed lifecycle to %q/%q", got.Status, got.Phase)
+	if got.Status != storage.GameStatusPlanned {
+		t.Fatalf("invalidated callback changed status to %q", got.Status)
 	}
 	if _, err := store.games.GetActiveSet(game.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("GetActiveSet error = %v, want gorm.ErrRecordNotFound", err)
@@ -424,9 +419,6 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	if g.Status != storage.GameStatusInProgress {
 		t.Fatalf("expected game to remain in_progress, got %q", g.Status)
 	}
-	if g.Phase != storage.GamePhaseBetweenSets {
-		t.Fatalf("expected game to move to between_sets, got %q", g.Phase)
-	}
 	if g.HomeSetsWon != 3 {
 		t.Fatalf("expected home sets won to become 3, got %d", g.HomeSetsWon)
 	}
@@ -497,9 +489,6 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	}
 	if g.Status != storage.GameStatusInProgress {
 		t.Fatalf("expected game to remain in_progress, got %q", g.Status)
-	}
-	if g.Phase != storage.GamePhaseBetweenSets {
-		t.Fatalf("expected game to move to between_sets, got %q", g.Phase)
 	}
 	if g.HomeSetsWon != 4 {
 		t.Fatalf("expected home sets won to become 4, got %d", g.HomeSetsWon)
@@ -633,7 +622,6 @@ func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
 	g.HomeSetsWon = 2
 	g.GuestSetsWon = 1
 	g.CurrentSetNumber = 3
-	g.Phase = storage.GamePhaseBetweenSets
 	if err := store.games.SaveGame(g); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}
@@ -653,9 +641,6 @@ func TestGameControlStartNextSetCreatesActiveSetAndBroadcasts(t *testing.T) {
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
 		t.Fatalf("GetGameByID after next set start: %v", err)
-	}
-	if g.Phase != storage.GamePhaseSetInProgress {
-		t.Fatalf("expected phase set_in_progress, got %q", g.Phase)
 	}
 	if g.CurrentSetNumber != 4 {
 		t.Fatalf("expected current set number 4, got %d", g.CurrentSetNumber)
@@ -701,7 +686,6 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	g.HomeSetsWon = 4
 	g.GuestSetsWon = 0
-	g.Phase = storage.GamePhaseBetweenSets
 	g.CurrentSetNumber = 4
 	if err := store.games.SaveGame(g); err != nil {
 		t.Fatalf("SaveGame: %v", err)
@@ -729,9 +713,6 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 	}
 	if g.Status != storage.GameStatusFinished {
 		t.Fatalf("expected finished status, got %q", g.Status)
-	}
-	if g.Phase != storage.GamePhaseFinished {
-		t.Fatalf("expected finished phase, got %q", g.Phase)
 	}
 
 	edited := fb.EditedMessages()
@@ -781,7 +762,6 @@ func TestGameControlGameFinishBroadcastsSummary(t *testing.T) {
 	g.HomeSetsWon = 4
 	g.GuestSetsWon = 0
 	g.CurrentSetNumber = 4
-	g.Phase = storage.GamePhaseBetweenSets
 	if err := store.games.SaveGame(g); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}
@@ -820,12 +800,9 @@ func (g *saveFailGames) WithinTx(fn func(repo *storage.GameRepository) error) er
 	}
 	return g.inner.WithinTx(fn)
 }
-func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
-func (g *saveFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
-func (g *saveFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
-func (g *saveFailGames) GetNonFinishedGame() (*storage.Game, error) {
-	return g.inner.GetNonFinishedGame()
-}
+func (g *saveFailGames) CreateGame(game *storage.Game) error        { return g.inner.CreateGame(game) }
+func (g *saveFailGames) CreateSet(set *storage.GameSet) error       { return g.inner.CreateSet(set) }
+func (g *saveFailGames) GetCurrentGame() (*storage.Game, error)     { return g.inner.GetCurrentGame() }
 func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
 func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)

@@ -40,12 +40,9 @@ func (g *txFailGames) WithinTx(fn func(repo *storage.GameRepository) error) erro
 	})
 }
 
-func (g *txFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
-func (g *txFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
-func (g *txFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
-func (g *txFailGames) GetNonFinishedGame() (*storage.Game, error) {
-	return g.inner.GetNonFinishedGame()
-}
+func (g *txFailGames) CreateGame(game *storage.Game) error        { return g.inner.CreateGame(game) }
+func (g *txFailGames) CreateSet(set *storage.GameSet) error       { return g.inner.CreateSet(set) }
+func (g *txFailGames) GetCurrentGame() (*storage.Game, error)     { return g.inner.GetCurrentGame() }
 func (g *txFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
 func (g *txFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
@@ -509,9 +506,6 @@ func TestPlanCreateGameFromGuestSelection(t *testing.T) {
 	if current.Status != storage.GameStatusPlanned {
 		t.Fatalf("expected planned status, got %q", current.Status)
 	}
-	if current.Phase != storage.GamePhasePlanned {
-		t.Fatalf("expected planned phase, got %q", current.Phase)
-	}
 	if current.HomeTeamID != home.ID || current.GuestTeamID != guest.ID {
 		t.Fatalf("unexpected teams on planned game: home=%d guest=%d", current.HomeTeamID, current.GuestTeamID)
 	}
@@ -567,7 +561,6 @@ func TestPlanWithInProgressGameStopsBeforeTeamSelection(t *testing.T) {
 	store.createAdminUser(t, userID, "busy-planner")
 	game := createCurrentPlannedGame(t, store, userID)
 	game.Status = storage.GameStatusInProgress
-	game.Phase = storage.GamePhaseBetweenSets
 	if err := store.games.SaveGame(game); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}
@@ -809,7 +802,6 @@ func TestPlanReplacementStartRejectsGameStartedBeforeConfirmation(t *testing.T) 
 	}
 	confirmationID := raw.(*planState).Replacement.ConfirmationMessageID
 	game.Status = storage.GameStatusInProgress
-	game.Phase = storage.GamePhaseBetweenSets
 	if err := store.games.SaveGame(game); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}
@@ -936,7 +928,6 @@ func TestPlanReplacementRejectsGameStartedDuringWizard(t *testing.T) {
 	confirmPlannedGameReplacement(t, r, userID, chatID)
 	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
 	game.Status = storage.GameStatusInProgress
-	game.Phase = storage.GamePhaseBetweenSets
 	if err := store.games.SaveGame(game); err != nil {
 		t.Fatalf("SaveGame: %v", err)
 	}

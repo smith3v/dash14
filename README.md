@@ -239,7 +239,7 @@ go test ./...
 go test ./pkg/telegram -run Plan
 go test ./pkg/telegram -run GameControl
 go test ./pkg/telegram -run Takeover
-go test ./pkg/storage -run 'Game|AppState'
+go test ./pkg/storage -run 'Game|Migrate'
 go test ./pkg/game
 go test ./pkg/overlay
 ```

@@ -35,7 +35,9 @@ dash14 --config config.yaml --import teams.yaml  # import teams and exit
 - `games` — one match and its aggregate state
 - `game_sets` — per-set score data and active set state
 - `users` — Telegram users known to the bot
-- `app_state` — singleton state (current_game_id)
+
+SQLite permits at most one non-finished game. The operator phase is derived
+from the game status and the presence of an unfinished set.
 
 ## Match Rules
 

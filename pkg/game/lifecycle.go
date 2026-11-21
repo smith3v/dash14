@@ -15,12 +15,12 @@ func IsSetFinishable(s SetScore) bool {
 
 // StartPlannedGame transitions a game from planned to in_progress.
 // Returns the updated GameState and the initial SetState (set 1, 0-0).
-// Returns an error if the game is not in "planned" status.
+// Returns an error if the game is not in the planned phase.
 func StartPlannedGame(g GameState) (GameState, SetState, error) {
-	if phaseOrStatus(g) != PhasePlanned {
+	if g.Phase != PhasePlanned {
 		return GameState{}, SetState{}, fmt.Errorf(
 			"game: StartPlannedGame requires phase %q, got %q",
-			PhasePlanned, phaseOrStatus(g),
+			PhasePlanned, g.Phase,
 		)
 	}
 
@@ -46,10 +46,10 @@ func StartPlannedGame(g GameState) (GameState, SetState, error) {
 // Returns an error if the set is not finishable (isFinishable returns false)
 // or if the set is already finished.
 func ConfirmSetFinished(g GameState, s SetState) (ConfirmSetResult, error) {
-	if phaseOrStatus(g) != PhaseSetInProgress {
+	if g.Phase != PhaseSetInProgress {
 		return ConfirmSetResult{}, fmt.Errorf(
 			"game: ConfirmSetFinished requires phase %q, got %q",
-			PhaseSetInProgress, phaseOrStatus(g),
+			PhaseSetInProgress, g.Phase,
 		)
 	}
 	if s.IsFinished {
@@ -97,10 +97,10 @@ func ConfirmSetFinished(g GameState, s SetState) (ConfirmSetResult, error) {
 // It increments the current set number, swaps sides for the new set, and
 // returns the fresh next SetState.
 func StartNextSet(g GameState) (GameState, SetState, error) {
-	if phaseOrStatus(g) != PhaseBetweenSets {
+	if g.Phase != PhaseBetweenSets {
 		return GameState{}, SetState{}, fmt.Errorf(
 			"game: StartNextSet requires phase %q, got %q",
-			PhaseBetweenSets, phaseOrStatus(g),
+			PhaseBetweenSets, g.Phase,
 		)
 	}
 	if IsGameFinishEligible(g) {
@@ -144,15 +144,15 @@ func IsGameFinishEligible(g GameState) bool {
 // Returns an error if the game has not met finish eligibility yet, or if the
 // game is already finished.
 func ConfirmGameFinished(g GameState) (ConfirmGameResult, error) {
-	if phaseOrStatus(g) == PhaseFinished || g.Status == "finished" {
+	if g.Phase == PhaseFinished || g.Status == "finished" {
 		return ConfirmGameResult{}, fmt.Errorf(
 			"game: ConfirmGameFinished: game is already finished",
 		)
 	}
-	if phaseOrStatus(g) != PhaseBetweenSets {
+	if g.Phase != PhaseBetweenSets {
 		return ConfirmGameResult{}, fmt.Errorf(
 			"game: ConfirmGameFinished requires phase %q, got %q",
-			PhaseBetweenSets, phaseOrStatus(g),
+			PhaseBetweenSets, g.Phase,
 		)
 	}
 
@@ -173,20 +173,4 @@ func ConfirmGameFinished(g GameState) (ConfirmGameResult, error) {
 func ReverseOverlaySides(g GameState) ReverseResult {
 	g.HomeSide, g.GuestSide = g.GuestSide, g.HomeSide
 	return ReverseResult{Game: g}
-}
-
-func phaseOrStatus(g GameState) string {
-	if g.Phase != "" {
-		return g.Phase
-	}
-	switch g.Status {
-	case "planned":
-		return PhasePlanned
-	case "finished":
-		return PhaseFinished
-	case "in_progress":
-		return PhaseSetInProgress
-	default:
-		return g.Status
-	}
 }

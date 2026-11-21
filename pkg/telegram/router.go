@@ -15,7 +15,6 @@ type GameStore interface {
 	CreateGame(game *storage.Game) error
 	CreateSet(set *storage.GameSet) error
 	GetCurrentGame() (*storage.Game, error)
-	GetNonFinishedGame() (*storage.Game, error)
 	GetGameByID(id uint) (*storage.Game, error)
 	GetActiveSet(gameID uint) (*storage.GameSet, error)
 	SaveGame(game *storage.Game) error
