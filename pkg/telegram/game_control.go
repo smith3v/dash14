@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"html"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -110,6 +110,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
+	// Keep committed score snapshots and their broadcasts in the same order
+	// when button callbacks run concurrently.
+	r.gameCallbackMu.Lock()
+	defer r.gameCallbackMu.Unlock()
+
 	game, home, guest, activeSet, err := r.loadControlContext()
 	if err != nil || game == nil {
 		return
@@ -129,7 +134,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	broadcastText := ""
+	var finishedSet *storage.GameSet
+	scoreChange := false
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
 		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
@@ -207,6 +213,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 				result = game2.DecrementGuest(score)
 			}
 
+			scoreChange = true
 			txActiveSet.HomeScore = result.Set.HomeScore
 			txActiveSet.GuestScore = result.Set.GuestScore
 			if err := repo.SaveSet(txActiveSet); err != nil {
@@ -239,6 +246,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			if err := repo.SaveSet(txActiveSet); err != nil {
 				return err
 			}
+			finishedSet = txActiveSet
 			applyGameState(txGame, res.Game)
 			return repo.SaveGame(txGame)
 
@@ -292,35 +300,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		}
 		activeSet = nil
 	}
-	switch data {
-	case "game:start":
-		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
-	case "game:set:start_next":
-		if activeSet != nil {
-			broadcastText = fmt.Sprintf(
-				"Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
-				activeSet.SetNumber,
-				home.Name,
-				guest.Name,
-				game.HomeSetsWon,
-				game.GuestSetsWon,
-			)
-		}
-	case "game:home:+1", "game:home:-1", "game:guest:+1", "game:guest:-1":
-		if activeSet != nil {
-			broadcastText = formatBroadcastScore(game, home, guest, activeSet)
-		}
-	case "game:finish":
-		broadcastText = fmt.Sprintf(
-			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
-			home.Name,
-			game.HomeSetsWon,
-			game.GuestSetsWon,
-			guest.Name,
-		)
-	case "game:reverse":
-		broadcastText = fmt.Sprintf("Overlay sides reversed for %s vs %s", home.Name, guest.Name)
-	}
 	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
 	_, editErr := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
 		ChatID:      chatID,
@@ -333,9 +312,33 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
 	}
 
-	if strings.TrimSpace(broadcastText) != "" {
-		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
+	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
+	if data == "game:reverse" {
+		text := fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName)
+		r.BroadcastExcept(ctx, text, game.CurrentAdminUserID)
+		return
 	}
+
+	if finishedSet != nil {
+		activeSet = finishedSet
+	}
+	var text string
+	switch {
+	case game.Status == storage.GameStatusFinished:
+		text = fmt.Sprintf("Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
+			homeName, game.HomeSetsWon, game.GuestSetsWon, guestName)
+	case activeSet != nil && game.Status == storage.GameStatusInProgress:
+		text = formatBroadcastScore(game, homeName, guestName, activeSet)
+	default:
+		return
+	}
+
+	r.enqueueBroadcast(ctx, broadcastJob{
+		text:           text,
+		excludeUserIDs: []int64{game.CurrentAdminUserID},
+		gameID:         game.ID,
+		scoreChange:    scoreChange,
+	})
 }
 
 var errUnhandledGameCallback = errors.New("telegram: unhandled game callback")
@@ -488,14 +491,18 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func formatBroadcastScore(game *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {
+func formatBroadcastScore(game *storage.Game, homeName, guestName string, set *storage.GameSet) string {
+	setLabel := fmt.Sprintf("Current set: %d", set.SetNumber)
+	if set.IsFinished {
+		setLabel = fmt.Sprintf("Set %d finished", set.SetNumber)
+	}
 	return fmt.Sprintf(
-		"🏠 %s <b>%d-%d</b> ✈️ %s\n<i>Current set: %d | Game score: %d-%d</i>",
-		home.Name,
+		"🏠 %s <b>%d-%d</b> ✈️ %s\n<i>%s | Game score: %d-%d</i>",
+		homeName,
 		set.HomeScore,
 		set.GuestScore,
-		guest.Name,
-		game.CurrentSetNumber,
+		guestName,
+		setLabel,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
 	)
