@@ -10,6 +10,18 @@ services:
       - ./runtime/out:/out
       - ./runtime/logs:/logs
 
+  db-backup:
+    build: ./deploy/backup
+    restart: unless-stopped
+    depends_on:
+      - app
+    init: true
+    network_mode: none
+    volumes:
+      - ./deploy/config/config.container.yaml:/config/config.yaml:ro
+      - ./runtime/data:/data:ro
+      - ./runtime/backups:/backups
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped

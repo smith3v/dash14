@@ -1,11 +1,14 @@
 # Deployment
 
-`dash14` can be deployed as a two-service stack with:
+`dash14` can be deployed as a Compose stack with:
 
 - `app` running `dash14` and serving the overlays over HTTP
+- `db-backup` taking daily SQLite snapshots
 - `cloudflared` publishing the app endpoint on your domain
 
-The canonical stack definition lives in `docker-compose.yml`. It is image-based so you can pin the deployed image tag in a local `.env` file.
+The canonical stack definition lives in `docker-compose.yml`. Pin the app's
+image tag in a local `.env` file. Compose builds the backup image from
+`deploy/backup`.
 
 Release images published by GitHub Actions are pushed to:
 
@@ -140,10 +143,11 @@ Replace `<tunnel-id>` and `<overlay.example.com>` with the values configured in 
 
 ## Start The Stack
 
-Create the runtime directories once and give the image's `dash14` user write access:
+Create the runtime directories once. Give the image's `dash14` user write
+access to `runtime/data`, `runtime/out`, and `runtime/logs`.
 
 ```bash
-mkdir -p runtime/data runtime/out runtime/logs
+mkdir -p runtime/data runtime/out runtime/logs runtime/backups
 ```
 
 Set the image tag in `.env`, then start the deployment:
@@ -169,7 +173,7 @@ Cloudflare Tunnel publishes those through the configured hostname.
    `http.listen_address: "0.0.0.0:8081"` to the mounted app config, and change the
    mounted tunnel origin to `http://app:8081`.
 4. Run `docker compose pull app` and
-   `docker compose up -d --remove-orphans --force-recreate app cloudflared`.
+   `docker compose up -d --remove-orphans --force-recreate app cloudflared db-backup`.
    Verify the deployment and refresh the OBS sources.
 
 To roll back, stop the new stack, restore the previous checkout, image pin,
@@ -183,6 +187,7 @@ After bringing the stack up, run:
 docker compose ps
 docker compose logs app
 docker compose logs cloudflared
+docker compose logs db-backup
 curl http://127.0.0.1:8080/
 curl http://127.0.0.1:8080/overlay.html
 curl http://127.0.0.1:8080/intermission.html
@@ -216,9 +221,43 @@ Imported logos are copied into `/data/logos`, which persists on the host under `
 
 ## Persistence And Backups
 
-Back up these paths on the Docker host:
+The production Compose service `db-backup` reads `sqlite.path` from the
+mounted app configuration and takes an online SQLite snapshot. Keep the
+database under `/data` so the service can read the database and its WAL
+files through the shared mount. The first snapshot runs when the database
+is available. The service takes another once the latest snapshot is 24 hours
+old, including after a restart. It retries failures after one minute.
+The image starts `schedule.sh`, which checks once a minute and calls
+`backup.sh` when a snapshot is due.
 
-- `runtime/data/dash14.db` for SQLite state, using SQLite's backup command or with the app stopped
+Snapshots are verified before publication and kept in `runtime/backups/` for
+14 days. The service prunes expired snapshots after a successful backup.
+For an existing deployment, start the new service with
+`docker compose up -d --build db-backup`. To take an additional snapshot and
+find its filename, run:
+
+```bash
+docker compose exec db-backup sh /usr/local/bin/dash14-backup
+```
+
+To restore, set `snapshot` to the filename you want to check:
+
+```bash
+snapshot=dash14-20261117T030000Z-aB12cd.db
+docker compose exec db-backup sqlite3 -readonly "/backups/$snapshot" 'PRAGMA quick_check;'
+```
+
+After the check prints `ok`, stop `app` and `db-backup` and ensure any
+one-off imports have finished. On the host, move the existing database and
+any matching `-wal` and `-shm` files aside together for rollback. Copy the
+snapshot to the host location for `sqlite.path`, using an account with access
+to the private backup files. Give the restored file the original database's
+owner, group, and permissions, then start `app` and `db-backup` again.
+
+Copy the snapshots and these other deployment files to separate storage for
+recovery after a host or disk failure:
+
+- `runtime/backups/` for verified SQLite snapshots
 - `runtime/data/logos/` for imported team logos
 - `runtime/logs/` if you want to retain logs
 - `deploy/config/config.container.yaml` for the app configuration
