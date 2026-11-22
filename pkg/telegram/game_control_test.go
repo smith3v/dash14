@@ -589,6 +589,21 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 	}
 }
 
+func createFinishedSets(t *testing.T, repo *storage.GameRepository, gameID uint, scores ...[2]int) {
+	t.Helper()
+	for i, score := range scores {
+		if err := repo.CreateSet(&storage.GameSet{
+			GameID:     gameID,
+			SetNumber:  i + 1,
+			HomeScore:  score[0],
+			GuestScore: score[1],
+			IsFinished: true,
+		}); err != nil {
+			t.Fatalf("create finished set %d: %v", i+1, err)
+		}
+	}
+}
+
 func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
@@ -630,9 +645,11 @@ func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	createFinishedSets(t, store.games, game.ID, [2]int{25, 21}, [2]int{25, 23})
 	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
-	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 3 finished · 25–10</b>\n<i>Sets won: 3–0</i>")
+	waitForScoreboardEdit(t, fb, scoreboard, "🏠 Control Home vs ✈️ Control Guest\n"+
+		"Set 1 · 25–21\nSet 2 · 25–23\nSet 3 · 25–10\n<i>Sets won: 3–0</i>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
@@ -674,10 +691,13 @@ func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T)
 	}
 	set.IsFinished = true
 	set.SetNumber = 3
+	set.HomeScore = 25
+	set.GuestScore = 20
 	if err := store.games.SaveSet(set); err != nil {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	createFinishedSets(t, store.games, game.ID, [2]int{25, 21}, [2]int{23, 25})
 	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next", "game:set:start_next"))
 
@@ -696,9 +716,18 @@ func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T)
 		t.Fatalf("unexpected active set after start next set: %+v", active)
 	}
 	waitForCondition(t, "live overlay render after next set start", func() bool { return renderer.liveCount() > 0 })
-	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 4 · 0–0</b>\n<i>Sets won: 2–1</i>")
+	const history = "🏠 Control Home vs ✈️ Control Guest\nSet 1 · 25–21\nSet 2 · 23–25\nSet 3 · 25–20\n"
+	waitForScoreboardEdit(t, fb, scoreboard, history+"<b>Set 4 · 0–0</b>\n<i>Sets won: 2–1</i>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
+	}
+
+	restarted, restartedBot, _ := newPlanRouter(t, store)
+	restarted.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-after-restart", "game:home:+1"))
+	waitForSentCount(t, func() int { return len(restartedBot.SentMessages()) }, 1)
+	fresh := restartedBot.SentMessages()[0]
+	if fresh.ChatID != subID || fresh.Text != history+"<b>Set 4 · 1–0</b>\n<i>Sets won: 2–1</i>" {
+		t.Fatalf("expected a fresh scoreboard with set history after restart, got %+v", fresh)
 	}
 }
 
@@ -811,13 +840,17 @@ func TestGameControlGameFinishEditsScoreboard(t *testing.T) {
 	}
 	set.IsFinished = true
 	set.SetNumber = 4
+	set.HomeScore = 25
+	set.GuestScore = 19
 	if err := store.games.SaveSet(set); err != nil {
 		t.Fatalf("SaveSet: %v", err)
 	}
 
+	createFinishedSets(t, store.games, game.ID, [2]int{25, 21}, [2]int{25, 23}, [2]int{26, 24})
 	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
-	waitForScoreboardEdit(t, fb, scoreboard, "🏠 Control Home vs ✈️ Control Guest\n<b>Final · 4–0</b>")
+	waitForScoreboardEdit(t, fb, scoreboard, "🏠 Control Home vs ✈️ Control Guest\n"+
+		"Set 1 · 25–21\nSet 2 · 25–23\nSet 3 · 26–24\nSet 4 · 25–19\n<b>Final · 4–0</b>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
@@ -840,6 +873,9 @@ func (g *saveFailGames) GetCurrentGame() (*storage.Game, error)     { return g.i
 func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
 func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
+}
+func (g *saveFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
+	return g.inner.ListSetsByGameID(gameID)
 }
 func (g *saveFailGames) SaveGame(game *storage.Game) error  { return g.inner.SaveGame(game) }
 func (g *saveFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
