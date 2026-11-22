@@ -591,9 +591,36 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 		t.Fatalf("unexpected initial scoreboard: %+v", scoreboard)
 	}
 
-	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
+	pressControl := func(action string) {
+		t.Helper()
+		edits := fb.EditedMessages()
+		for i := len(edits) - 1; i >= 0; i-- {
+			edit := edits[i]
+			if edit.ChatID != chatID || edit.MessageID != ctrlID {
+				continue
+			}
+			keyboard := edit.ReplyMarkup.(*models.InlineKeyboardMarkup)
+			for _, row := range keyboard.InlineKeyboard {
+				for _, button := range row {
+					name, _, _ := strings.Cut(button.CallbackData, "|")
+					if name == action {
+						r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, action, button.CallbackData))
+						return
+					}
+				}
+			}
+			break
+		}
+		t.Fatalf("action %q missing from the rendered control keyboard", action)
+	}
+
+	pressControl(scoreHomeUp)
 	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 1–0</b>")
-	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-score-correction", "game:home:-1"))
+	pressControl(scoreGuestUp)
+	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 1–1</b>")
+	pressControl(scoreHomeDown)
+	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 0–1</b>")
+	pressControl(scoreGuestDown)
 	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 0–0</b>")
 
 	for _, edit := range fb.EditedMessages() {

@@ -264,10 +264,10 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 		}
 		if !finishable {
 			homeButtons = append(homeButtons, models.InlineKeyboardButton{
-				Text: fmt.Sprintf("%s +1", homeName), CallbackData: scoreHomeUp,
+				Text: fmt.Sprintf("%s +1", homeName), CallbackData: gameCallbackData(scoreHomeUp, game, activeSet),
 			})
 			guestButtons = append(guestButtons, models.InlineKeyboardButton{
-				Text: fmt.Sprintf("%s +1", guestName), CallbackData: scoreGuestUp,
+				Text: fmt.Sprintf("%s +1", guestName), CallbackData: gameCallbackData(scoreGuestUp, game, activeSet),
 			})
 		}
 		rows = append(rows, homeButtons, guestButtons)
