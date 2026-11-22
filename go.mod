@@ -1,6 +1,6 @@
 module github.com/smith3v/dash14
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/glebarez/sqlite v1.11.0
@@ -18,7 +18,7 @@ require (
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.7.0 // indirect
-	golang.org/x/text v0.20.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect

@@ -64,7 +64,7 @@ from the game status and the presence of an unfinished set.
 
 ## Development Notes
 
-- Go 1.27.3+; use `go fmt` / `goimports` before committing
+- Go 1.27.4+; use `go fmt` / `goimports` before committing
 - Run `go test ./...` before pushing; use `-cover` for new features
 - Table-driven tests in `_test.go` files colocated with the code
 - Never commit real tokens or DB passwords; use `config.example.yaml` as template

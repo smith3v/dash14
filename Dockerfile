@@ -1,4 +1,4 @@
-FROM golang:1.27.3 AS builder
+FROM golang:1.27.4 AS builder
 
 WORKDIR /src
 
@@ -11,7 +11,7 @@ COPY cmd ./cmd
 COPY pkg ./pkg
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/dash14 ./cmd/dash14
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 WORKDIR /app
 
