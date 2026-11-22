@@ -3,8 +3,6 @@ package telegram
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/smith3v/dash14/pkg/game"
 	"github.com/smith3v/dash14/pkg/storage"
@@ -46,13 +44,13 @@ func nextLifecycleAction(match *storage.Game, set *storage.GameSet) string {
 	return ""
 }
 
-func decodeLifecycleCallback(data string) (action string, setNumber int) {
-	if i := strings.LastIndexByte(data, ':'); i > 0 && isLifecycleAction(data[:i]) {
-		if number, err := strconv.Atoi(data[i+1:]); err == nil && number > 0 {
-			return data[:i], number
-		}
-	}
-	return data, 0
+// callbackRevision identifies the displayed set and phase within a control message.
+func callbackRevision(match *storage.Game, set *storage.GameSet) string {
+	return fmt.Sprintf("%x/%x/%s", match.CurrentSetNumber, activeSetID(set), match.Status)
+}
+
+func gameCallbackData(action string, match *storage.Game, set *storage.GameSet) string {
+	return action + "|" + callbackRevision(match, set)
 }
 
 func activeSetID(set *storage.GameSet) uint {

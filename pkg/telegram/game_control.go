@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -99,7 +100,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	chatID := cb.Message.Message.Chat.ID
 	messageID := cb.Message.Message.ID
 	userID := cb.From.ID
-	data, targetSet := decodeLifecycleCallback(cb.Data)
+	data, expected, _ := strings.Cut(cb.Data, "|")
 
 	_, _ = r.client.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: cb.ID,
@@ -110,12 +111,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	// Keep committed score snapshots and their broadcasts in the same order
-	// when commands arrive from the bot and scoring panel.
-	r.gameActionMu.Lock()
-	defer r.gameActionMu.Unlock()
-
-	game, home, guest, activeSet, err := r.loadControlContext()
+	game, home, guest, _, err := r.loadControlContext()
 	if err != nil || game == nil {
 		return
 	}
@@ -134,7 +130,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	expected := lifecycleRevision(game, activeSet)
+	// Serialize committed snapshots and their broadcasts across both surfaces.
+	r.gameActionMu.Lock()
 	var committedGame *storage.Game
 	var committedSet *storage.GameSet
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
@@ -150,8 +147,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		if err != nil {
 			return err
 		}
-		if lifecycleRevision(txGame, txSet) != expected ||
-			(targetSet != 0 && txGame.CurrentSetNumber != targetSet) {
+		if callbackRevision(txGame, txSet) != expected {
 			return errStaleGameControl
 		}
 
@@ -171,6 +167,15 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		committedGame, committedSet = txGame, txSet
 		return nil
 	})
+	var edited chan struct{}
+	if err == nil {
+		if r.gameChanged != nil {
+			r.gameChanged()
+		}
+		edited = make(chan struct{})
+		r.enqueueGameBroadcast(ctx, data, committedGame, home, guest, committedSet, edited)
+	}
+	r.gameActionMu.Unlock()
 	if errors.Is(err, errUnhandledGameCallback) {
 		return
 	}
@@ -198,12 +203,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	if r.gameChanged != nil {
-		r.gameChanged()
-	}
-
+	defer close(edited)
 	r.editGameControl(ctx, committedGame.ID, chatID, cb.Message.Message.Chat.Type == models.ChatTypePrivate)
-	r.enqueueGameBroadcast(ctx, data, committedGame, home, guest, committedSet)
 }
 
 var errUnhandledGameCallback = errors.New("telegram: unhandled game callback")
@@ -256,10 +257,10 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	canAdjustScore := phase == storage.GamePhaseSetInProgress && activeSet != nil
 	if canAdjustScore {
 		homeButtons := []models.InlineKeyboardButton{
-			{Text: fmt.Sprintf("%s -1", homeName), CallbackData: scoreHomeDown},
+			{Text: fmt.Sprintf("%s -1", homeName), CallbackData: gameCallbackData(scoreHomeDown, game, activeSet)},
 		}
 		guestButtons := []models.InlineKeyboardButton{
-			{Text: fmt.Sprintf("%s -1", guestName), CallbackData: scoreGuestDown},
+			{Text: fmt.Sprintf("%s -1", guestName), CallbackData: gameCallbackData(scoreGuestDown, game, activeSet)},
 		}
 		if !finishable {
 			homeButtons = append(homeButtons, models.InlineKeyboardButton{
@@ -273,12 +274,12 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 	if action := nextLifecycleAction(game, activeSet); action != "" {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: lifecycleActionLabel(action), CallbackData: fmt.Sprintf("%s:%d", action, game.CurrentSetNumber)},
+			{Text: lifecycleActionLabel(action), CallbackData: gameCallbackData(action, game, activeSet)},
 		})
 	}
 	if phase != storage.GamePhaseFinished {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Reverse overlay sides", CallbackData: "game:reverse"},
+			{Text: "Reverse overlay sides", CallbackData: gameCallbackData(switchSides, game, activeSet)},
 		})
 	}
 

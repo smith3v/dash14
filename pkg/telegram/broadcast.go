@@ -17,8 +17,9 @@ import (
 type broadcastJob struct {
 	text           string
 	excludeUserIDs []int64
-	gameID         uint // zero for an ordinary announcement
-	scoreChange    bool // a pending point update can be replaced by a newer scoreboard
+	gameID         uint            // zero for an ordinary announcement
+	scoreChange    bool            // a pending point update can be replaced by a newer scoreboard
+	after          <-chan struct{} // optional wait for the Telegram control edit
 }
 
 type scoreboardMessage struct {
@@ -42,10 +43,14 @@ func (r *Router) BroadcastExcept(ctx context.Context, text string, excludeUserID
 	})
 }
 
-func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet) {
+func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet, after <-chan struct{}) {
 	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
 	if action == switchSides {
-		r.BroadcastExcept(ctx, fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName), match.CurrentAdminUserID)
+		r.enqueueBroadcast(ctx, broadcastJob{
+			text:           fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName),
+			excludeUserIDs: []int64{match.CurrentAdminUserID},
+			after:          after,
+		})
 		return
 	}
 
@@ -64,6 +69,7 @@ func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match 
 		excludeUserIDs: []int64{match.CurrentAdminUserID},
 		gameID:         match.ID,
 		scoreChange:    isScoringAction(action),
+		after:          after,
 	})
 }
 
@@ -114,6 +120,9 @@ func (r *Router) broadcastLoop() {
 		if job.gameID != 0 && job.gameID != gameID {
 			gameID = job.gameID
 			scoreboards = make(map[int64]scoreboardMessage)
+		}
+		if job.after != nil {
+			<-job.after
 		}
 		r.performBroadcast(job, scoreboards)
 	}

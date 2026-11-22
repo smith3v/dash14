@@ -46,9 +46,24 @@ func (r *Router) editGameControl(ctx context.Context, gameID uint, fallbackChatI
 	r.controlEditMu.Lock()
 	defer r.controlEditMu.Unlock()
 
-	match, err := r.games.GetGameByID(gameID)
+	var match *storage.Game
+	var home, guest *storage.Team
+	var set *storage.GameSet
+	err := r.games.WithinTxContext(ctx, func(repo *storage.GameRepository) error {
+		var err error
+		match, err = repo.GetGameByID(gameID)
+		if err != nil || match.ControlMessageID == 0 {
+			return err
+		}
+		home, guest, err = repo.GetGameTeams(match)
+		if err != nil {
+			return err
+		}
+		set, err = findActiveSet(repo, gameID)
+		return err
+	})
 	if err != nil {
-		r.logger.ErrorContext(ctx, "load game for control message", "game_id", gameID, "err", err)
+		r.logger.ErrorContext(ctx, "load game control message state", "game_id", gameID, "err", err)
 		return
 	}
 	chatID, private := fallbackChatID, fallbackPrivate
@@ -57,16 +72,6 @@ func (r *Router) editGameControl(ctx context.Context, gameID uint, fallbackChatI
 		private = chatID == match.CurrentAdminUserID
 	}
 	if match.ControlMessageID == 0 || chatID == 0 {
-		return
-	}
-	home, guest, err := r.loadGameTeams(match)
-	if err != nil {
-		r.logger.ErrorContext(ctx, "load teams for control message", "game_id", gameID, "err", err)
-		return
-	}
-	set, err := findActiveSet(r.games, gameID)
-	if err != nil {
-		r.logger.ErrorContext(ctx, "load set for control message", "game_id", gameID, "err", err)
 		return
 	}
 

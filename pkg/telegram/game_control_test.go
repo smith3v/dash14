@@ -36,6 +36,22 @@ func makeGameCallbackUpdate(userID, chatID int64, messageID int, callbackID, dat
 	}
 }
 
+func makeCurrentGameCallbackUpdate(t *testing.T, games *storage.GameRepository, userID, chatID int64, messageID int, callbackID, action string) *models.Update {
+	t.Helper()
+	match, err := games.GetCurrentGame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match == nil {
+		t.Fatal("expected current game for callback")
+	}
+	set, err := findActiveSet(games, match.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return makeGameCallbackUpdate(userID, chatID, messageID, callbackID, gameCallbackData(action, match, set))
+}
+
 func createCurrentPlannedGame(t *testing.T, store *planTestStore, adminID int64) *storage.Game {
 	t.Helper()
 	home := insertTeam(t, store.teams, "ctrl-home", "Control Home", "CH")
@@ -64,7 +80,7 @@ func keyboardCallbackData(t *testing.T, markup any) []string {
 	var data []string
 	for _, row := range kb.InlineKeyboard {
 		for _, btn := range row {
-			action, _ := decodeLifecycleCallback(btn.CallbackData)
+			action, _, _ := strings.Cut(btn.CallbackData, "|")
 			data = append(data, action)
 		}
 	}
@@ -364,9 +380,9 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 	ctrlID := current.ControlMessageID
 
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start", "game:start"))
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-home", "game:home:+1"))
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-guest", "game:guest:+1"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-start", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-home", "game:home:+1"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-guest", "game:guest:+1"))
 
 	active, err := store.games.GetActiveSet(game.ID)
 	if err != nil {
@@ -400,7 +416,7 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	r.handleGame(ctx, nil, makeGameMessageUpdate(userID, chatID, "/game"))
 	current, _ := store.games.GetGameByID(game.ID)
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start2", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-start2", "game:start"))
 
 	g, err := store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -424,7 +440,7 @@ func TestGameControlSet3FinishTransitionsToBetweenSets(t *testing.T) {
 	}
 
 	beforeIntermission := renderer.intermissionCount()
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -471,7 +487,7 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	r.handleGame(ctx, nil, makeGameMessageUpdate(userID, chatID, "/game"))
 	current, _ := store.games.GetGameByID(game.ID)
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start4", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-start4", "game:start"))
 
 	g, err := store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -495,7 +511,7 @@ func TestGameControlSet4FinishPromptsGameFinishWithoutAutoFinish(t *testing.T) {
 	}
 
 	beforeIntermission := renderer.intermissionCount()
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-set-finish4", "game:set:finish"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-set-finish4", "game:set:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -562,7 +578,7 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 		t.Fatal(err)
 	}
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start3", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 	messages := fb.SentMessages()
 	if !strings.Contains(messages[0].Text, "Home: A&amp;B &lt;Home&gt;") {
@@ -575,9 +591,9 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 		t.Fatalf("unexpected initial scoreboard: %+v", scoreboard)
 	}
 
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
 	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 1–0</b>")
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-correction", "game:home:-1"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-score-correction", "game:home:-1"))
 	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 0–0</b>")
 
 	for _, edit := range fb.EditedMessages() {
@@ -607,7 +623,7 @@ func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
 	current, _ := store.games.GetGameByID(game.ID)
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-set-finish", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-set-finish", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
 	g, err := store.games.GetGameByID(game.ID)
@@ -632,7 +648,7 @@ func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 	}
 
 	scoreboard := fb.SentMessages()[1]
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
 	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 3 finished · 25–10</b>\n<i>Sets won: 3–0</i>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
@@ -656,7 +672,7 @@ func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T)
 	r.handleGame(ctx, nil, makeGameMessageUpdate(adminID, chatID, "/game"))
 	current, _ := store.games.GetGameByID(game.ID)
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next-flow", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-next-flow", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
 	g, err := store.games.GetGameByID(game.ID)
@@ -680,7 +696,7 @@ func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T)
 	}
 
 	scoreboard := fb.SentMessages()[1]
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-next", "game:set:start_next"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-next", "game:set:start_next"))
 
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -719,7 +735,7 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 		t.Fatalf("GetGameByID: %v", err)
 	}
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start5", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-start5", "game:start"))
 
 	g, err := store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -746,7 +762,7 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 		t.Fatalf("SaveSet finished: %v", err)
 	}
 
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-game-finish", "game:finish"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, userID, chatID, ctrlID, "cb-game-finish", "game:finish"))
 
 	g, err = store.games.GetGameByID(game.ID)
 	if err != nil {
@@ -793,7 +809,7 @@ func TestGameControlGameFinishEditsScoreboard(t *testing.T) {
 		t.Fatalf("GetGameByID: %v", err)
 	}
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-finish-broadcast", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-finish-broadcast", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 
 	g, err := store.games.GetGameByID(game.ID)
@@ -817,7 +833,7 @@ func TestGameControlGameFinishEditsScoreboard(t *testing.T) {
 	}
 
 	scoreboard := fb.SentMessages()[1]
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
 	waitForScoreboardEdit(t, fb, scoreboard, "🏠 Control Home vs ✈️ Control Guest\n<b>Final · 4–0</b>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
@@ -830,10 +846,13 @@ type saveFailGames struct {
 }
 
 func (g *saveFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	return g.WithinTxContext(context.Background(), fn)
+}
+func (g *saveFailGames) WithinTxContext(ctx context.Context, fn func(repo *storage.GameRepository) error) error {
 	if g.failWithinTx {
 		return errors.New("simulated transactional failure")
 	}
-	return g.inner.WithinTx(fn)
+	return g.inner.WithinTxContext(ctx, fn)
 }
 func (g *saveFailGames) CreateGame(game *storage.Game) error        { return g.inner.CreateGame(game) }
 func (g *saveFailGames) CreateSet(set *storage.GameSet) error       { return g.inner.CreateSet(set) }
@@ -898,7 +917,7 @@ func TestGameControlSignalsOverlayAndEditsControlBeforeBroadcast(t *testing.T) {
 
 	callbackDone := make(chan struct{})
 	go func() {
-		r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-order", "game:start"))
+		r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-order", "game:start"))
 		close(callbackDone)
 	}()
 	select {
@@ -952,7 +971,7 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 		t.Fatalf("GetGameByID: %v", err)
 	}
 	ctrlID := current.ControlMessageID
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start-save", "game:start"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-start-save", "game:start"))
 	waitForCondition(t, "initial overlay renders after start", func() bool {
 		return renderer.liveCount() == 1 && renderer.intermissionCount() == 1
 	})
@@ -960,7 +979,7 @@ func TestGameControlSaveFailureSkipsEditAndAsyncSideEffects(t *testing.T) {
 
 	beforeMsgs := len(fb.SentMessages())
 	r.games = &saveFailGames{inner: store.games, failWithinTx: true}
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-save-fail", "game:home:+1"))
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, ctrlID, "cb-score-save-fail", "game:home:+1"))
 
 	if len(fb.EditedMessages()) != 1 {
 		t.Fatalf("expected no extra edited control message after save failure, got %d edits", len(fb.EditedMessages()))

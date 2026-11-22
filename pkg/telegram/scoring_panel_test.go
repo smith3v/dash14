@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/google/uuid"
 	"github.com/smith3v/dash14/pkg/storage"
@@ -228,7 +229,7 @@ func TestScoringPanelSavesOnceAndKeepsTeamIdentityThroughSwitches(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(owner, owner,
+	r.handleGameCallback(ctx, nil, makeCurrentGameCallbackUpdate(t, store.games, owner, owner,
 		current.ControlMessageID, "bot-point", scoreGuestUp))
 	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 5 · 7–8</b>")
 }
@@ -260,6 +261,8 @@ func TestScoringPanelRejectsOldSetAndPreviousOperator(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	oldPoint := makeCurrentGameCallbackUpdate(t, store.games, owner, owner,
+		current.ControlMessageID, "old-point", scoreHomeUp)
 	auth := signedScoringLaunch(testScoringToken, owner, time.Now())
 	nextAuth := signedScoringLaunch(testScoringToken, nextOwner, time.Now())
 	cmd := &scoringCommand{GameID: match.ID, SetID: set.ID, RequestID: uuid.New(), Action: scoreHomeUp}
@@ -267,13 +270,19 @@ func TestScoringPanelRejectsOldSetAndPreviousOperator(t *testing.T) {
 	scoringRequest(t, mux, auth, cmd, http.StatusOK)
 
 	for _, action := range []string{"game:set:finish", "game:set:start_next"} {
-		update := makeGameCallbackUpdate(owner, owner, current.ControlMessageID, action, action)
+		update := makeCurrentGameCallbackUpdate(t, store.games, owner, owner, current.ControlMessageID, action, action)
 		update.CallbackQuery.Message.Message.Chat.Type = models.ChatTypePrivate
 		r.handleGameCallback(t.Context(), nil, update)
 	}
 	state := scoringRequest(t, mux, auth, nil, http.StatusOK)
 	if state.SetNumber != 2 || state.SetID == set.ID {
 		t.Fatalf("bot did not start the next set: %+v", state)
+	}
+	r.handleGameCallback(t.Context(), nil, oldPoint)
+	r.handleGameCallback(t.Context(), nil, makeGameCallbackUpdate(owner, owner,
+		current.ControlMessageID, "legacy-point", scoreHomeUp))
+	if after := scoringRequest(t, mux, auth, nil, http.StatusOK); after != state {
+		t.Fatalf("old Telegram controls changed the new set: %+v", after)
 	}
 	scoringRequest(t, mux, auth, cmd, http.StatusConflict)
 	cmd.RequestID = uuid.New()
@@ -340,7 +349,7 @@ func TestScoringControlsStopAddingAtWinningScore(t *testing.T) {
 			for _, action := range []string{scoreHomeUp, scoreGuestUp} {
 				extra := scoringCommand{GameID: match.ID, SetID: set.ID, RequestID: uuid.New(), Action: action}
 				scoringRequest(t, mux, auth, &extra, http.StatusConflict)
-				r.handleGameCallback(t.Context(), nil, makeGameCallbackUpdate(
+				r.handleGameCallback(t.Context(), nil, makeCurrentGameCallbackUpdate(t, store.games,
 					owner, owner, control.ControlMessageID, action, action,
 				))
 			}
@@ -430,6 +439,7 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 	scoringRequest(t, mux, auth, &start, http.StatusConflict)
 
 	var oldIntermission scoringCommand
+	var staleFinish string
 	for number := 1; number <= 5; number++ {
 		set, err := store.games.GetActiveSet(match.ID)
 		if err != nil {
@@ -446,6 +456,13 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 		if err := store.games.SaveSet(set); err != nil {
 			t.Fatal(err)
 		}
+		if number == 1 {
+			current, err := store.games.GetGameByID(match.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			staleFinish = gameCallbackData(finishSet, current, set)
+		}
 		if number == 2 {
 			r.handleGame(t.Context(), nil, makeGameMessageUpdate(nextOperator, nextOperator, "/game"))
 			current, err := store.games.GetGameByID(match.ID)
@@ -453,7 +470,7 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 				t.Fatal(err)
 			}
 			r.handleGameCallback(t.Context(), nil, makeGameCallbackUpdate(nextOperator, nextOperator,
-				current.ControlMessageID, "stale-set", finishSet+":1"))
+				current.ControlMessageID, "stale-set", staleFinish))
 		}
 		endSet := command(boundState(auth, http.StatusOK), finishSet)
 		state = scoringRequest(t, mux, auth, &endSet, http.StatusOK)
@@ -508,5 +525,93 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 	}
 	if retry := scoringRequest(t, mux, auth, &finish, http.StatusOK); retry != final {
 		t.Fatalf("finish retry picked up a new match: %+v", retry)
+	}
+}
+
+type blockedControlEditBot struct {
+	FakeBot
+	started chan struct{}
+	unblock chan struct{}
+}
+
+func (b *blockedControlEditBot) EditMessageText(ctx context.Context, params *bot.EditMessageTextParams) (*models.Message, error) {
+	close(b.started)
+	<-b.unblock
+	return b.FakeBot.EditMessageText(ctx, params)
+}
+
+func TestScoringPanelWritesWhileTelegramControlEditIsBlocked(t *testing.T) {
+	store := openPlanTestStore(t)
+	fb := &blockedControlEditBot{started: make(chan struct{}), unblock: make(chan struct{})}
+	r := NewRouter(nil, discardLogger(), fb, store.users, store.teams)
+	r.SetGameServices(store.games, nil)
+	mux := http.NewServeMux()
+	r.RegisterScoringPanel(mux, testScoringToken, testScoringURL)
+
+	const owner = 623
+	store.createAdminUser(t, owner, "owner")
+	match := createCurrentPlannedGame(t, store, owner)
+	r.handleGame(t.Context(), nil, makeGameMessageUpdate(owner, owner, "/game"))
+	control, err := store.games.GetGameByID(match.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := makeCurrentGameCallbackUpdate(t, store.games, owner, owner, control.ControlMessageID, "start", startMatch)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.handleGameCallback(t.Context(), nil, update)
+	}()
+	t.Cleanup(func() {
+		close(fb.unblock)
+		<-done
+	})
+	select {
+	case <-fb.started:
+	case <-time.After(time.Second):
+		t.Fatal("Telegram control edit never started")
+	}
+
+	auth := signedScoringLaunch(testScoringToken, owner, time.Now())
+	state := scoringRequest(t, mux, auth, nil, http.StatusOK)
+	cmd := scoringCommand{GameID: match.ID, SetID: state.SetID, RequestID: uuid.New(), Action: scoreHomeUp}
+	request := func(ctx context.Context) *http.Request {
+		t.Helper()
+		payload, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/scoring/actions", bytes.NewReader(payload))
+		req.Header.Set("Authorization", "tma "+auth)
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+
+	submit := func(req *http.Request) *httptest.ResponseRecorder {
+		t.Helper()
+		result := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			res := httptest.NewRecorder()
+			mux.ServeHTTP(res, req)
+			result <- res
+		}()
+		select {
+		case res := <-result:
+			return res
+		case <-time.After(time.Second):
+			t.Fatal("scoring waited for a Telegram network request")
+			return nil
+		}
+	}
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	submit(request(canceled))
+	if after := scoringRequest(t, mux, auth, nil, http.StatusOK); after != state {
+		t.Fatalf("canceled request changed the score: %+v", after)
+	}
+	res := submit(request(t.Context()))
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"score":1`) {
+		t.Fatalf("unexpected scoring response: %d %s", res.Code, res.Body.String())
 	}
 }

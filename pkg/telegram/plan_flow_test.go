@@ -29,10 +29,13 @@ type txFailGames struct {
 }
 
 func (g *txFailGames) WithinTx(fn func(repo *storage.GameRepository) error) error {
+	return g.WithinTxContext(context.Background(), fn)
+}
+func (g *txFailGames) WithinTxContext(ctx context.Context, fn func(repo *storage.GameRepository) error) error {
 	if g.failWithinTx {
 		return fmt.Errorf("simulated transaction setup failure")
 	}
-	return g.inner.WithinTx(func(repo *storage.GameRepository) error {
+	return g.inner.WithinTxContext(ctx, func(repo *storage.GameRepository) error {
 		if g.failCreate {
 			return fmt.Errorf("simulated create failure")
 		}

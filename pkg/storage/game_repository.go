@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -31,6 +32,11 @@ func (r *GameRepository) WithinTx(fn func(repo *GameRepository) error) error {
 		return fmt.Errorf("storage: transaction failed: %w", err)
 	}
 	return nil
+}
+
+// WithinTxContext ties the transaction lifetime to the caller's context.
+func (r *GameRepository) WithinTxContext(ctx context.Context, fn func(repo *GameRepository) error) error {
+	return NewGameRepository(r.db.WithContext(ctx)).WithinTx(fn)
 }
 
 // CreateGame inserts a new Game record and populates its ID on success.

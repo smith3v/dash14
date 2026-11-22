@@ -155,6 +155,9 @@ func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
 	}
 	p.router.gameActionMu.Lock()
 	defer p.router.gameActionMu.Unlock()
+	if r.Context().Err() != nil {
+		return
+	}
 	p.respond(w, r, userID, cmd.GameID, &cmd)
 }
 
@@ -170,7 +173,7 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 	var committedGame *storage.Game
 	var committedSet *storage.GameSet
 	var home, guest *storage.Team
-	err := p.router.games.WithinTx(func(repo *storage.GameRepository) error {
+	err := p.router.games.WithinTxContext(r.Context(), func(repo *storage.GameRepository) error {
 		var match *storage.Game
 		var err error
 		if gameID == 0 {
@@ -215,7 +218,9 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		return nil
 	})
 	if err != nil {
-		p.writeError(w, r, err)
+		if r.Context().Err() == nil {
+			p.writeError(w, r, err)
+		}
 		return
 	}
 
@@ -223,7 +228,7 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if p.router.gameChanged != nil {
 			p.router.gameChanged()
 		}
-		p.router.enqueueGameBroadcast(r.Context(), cmd.Action, committedGame, home, guest, committedSet)
+		p.router.enqueueGameBroadcast(r.Context(), cmd.Action, committedGame, home, guest, committedSet, nil)
 		select {
 		case p.controlEdit <- state.GameID:
 		default:
