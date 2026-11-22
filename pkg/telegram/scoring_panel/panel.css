@@ -107,31 +107,39 @@ summary, #switch-sides, #transition, #retry {
 
 .add {
   background: var(--tile);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: clamp(4px, 2vh, 16px);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  justify-items: center;
+  container-type: size;
   min-width: 0;
-  padding: 6px 8px;
+  min-height: 0;
+  padding: clamp(6px, 2vh, 16px) 8px;
   overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .add:active:not(:disabled) { filter: brightness(1.3); }
 
 .name {
+  grid-row: 1;
+  align-self: start;
+  max-width: 100%;
   font-size: clamp(1rem, 4.2vw, 1.9rem);
   line-height: 1.1;
   font-weight: 700;
 }
 
 .score {
-  font-size: clamp(2.75rem, min(19vw, 19vh), 8rem);
+  grid-row: 2;
+  font-size: clamp(2.75rem, min(24vw, 19vh), 8rem);
+  font-size: clamp(2.75rem, min(24vw, 32cqh, 56cqw), 8rem);
   line-height: .95;
   font-variant-numeric: tabular-nums;
 }
 
 .increment {
+  grid-row: 3;
+  align-self: end;
   color: var(--cue);
   font-size: clamp(1.1rem, 4vw, 1.6rem);
   font-weight: 800;
@@ -157,25 +165,20 @@ footer.error { color: #ffdbaa; }
 
 @media (orientation: landscape) and (max-height: 440px) {
   :root { --gap: 8px; }
-  .name { font-size: clamp(1rem, 3vw, 1.5rem); }
-  .score { font-size: clamp(2.4rem, 20vh, 5.5rem); }
-  .increment { font-size: 1.1rem; }
-  .add { gap: 4px; }
-}
+  .add { padding-block: 4px; }
 
-@media (orientation: landscape) and (max-height: 320px) {
-  .add {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-content: center;
-    column-gap: 12px;
-    padding-inline: 12px;
-    text-align: left;
+  .name {
+    font-size: clamp(.8rem, 2.8vw, 1.5rem);
+    font-size: clamp(.8rem, 22cqh, 1.5rem);
   }
 
   .score {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    font-size: clamp(2.4rem, 18vh, 4rem);
+    font-size: clamp(1.625rem, 14vh, 5.5rem);
+    font-size: clamp(1.625rem, min(46cqh, 56cqw), 5.5rem);
+  }
+
+  .increment {
+    font-size: .85rem;
+    font-size: clamp(.75rem, 19cqh, 1.1rem);
   }
 }
