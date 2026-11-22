@@ -119,7 +119,7 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 		t.Fatalf("expected control message text, got %q", last.Text)
 	}
 	if last.ParseMode != models.ParseModeHTML ||
-		!strings.Contains(last.Text, "\n🏠 Control Home vs ✈️ Control Guest\n<b>Set 1 · 🏠 0 – ✈️ 0</b>\n") {
+		!strings.Contains(last.Text, "\n🏠 Control Home vs ✈️ Control Guest\n\n<b>Set 1 · 🏠 0 – ✈️ 0</b>\n\n") {
 		t.Fatalf("expected the matchup and labeled score in the control message, got %q (%q)", last.Text, last.ParseMode)
 	}
 	if last.ReplyMarkup == nil {
@@ -383,7 +383,7 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 	last := edits[len(edits)-1]
 	if last.ChatID != chatID || last.MessageID != ctrlID || last.ParseMode != models.ParseModeHTML ||
-		!strings.Contains(last.Text, "\n<b>Set 1 · 🏠 2 – ✈️ 1</b>\n") {
+		!strings.Contains(last.Text, "\n\n<b>Set 1 · 🏠 2 – ✈️ 1</b>\n\n") {
 		t.Fatalf("expected a bold set score on the edited control message, got %+v", last)
 	}
 }

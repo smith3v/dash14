@@ -375,7 +375,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\n%s\n<b>Set %d · 🏠 %d – ✈️ %d</b>\nSets %d–%d",
+		"Game controls\nPhase: %s\n%s\n\n<b>Set %d · 🏠 %d – ✈️ %d</b>\n\nSets %d–%d",
 		phase,
 		matchup,
 		game.CurrentSetNumber,
