@@ -37,7 +37,7 @@ const guest = teamControl("guest");
 teams.append(home.card, guest.card);
 
 function setStatus(message, error = false) {
-  status.textContent = message;
+  if (status.textContent !== message) status.textContent = message;
   status.parentElement.classList.toggle("error", error);
 }
 
@@ -48,7 +48,7 @@ function editable() {
 function updateButtons() {
   const enabled = editable();
   for (const [control, team] of [[home, state?.home], [guest, state?.guest]]) {
-    control.add.disabled = !enabled;
+    control.add.disabled = !enabled || state.setFinishable;
     control.subtract.disabled = !enabled || team.score === 0;
   }
   switchSides.disabled = !enabled;
@@ -64,7 +64,9 @@ function render(nextState) {
   for (const [control, team] of [[home, state.home], [guest, state.guest]]) {
     control.name.textContent = team.name;
     control.score.textContent = active ? team.score : "–";
-    control.add.setAttribute("aria-label", team.name + ", " + team.score + " points. Add one point");
+    control.add.querySelector(".increment").hidden = state.setFinishable;
+    const label = team.name + ", " + team.score + " points";
+    control.add.setAttribute("aria-label", state.setFinishable ? label : label + ". Add one point");
     control.subtract.setAttribute("aria-label", "Remove one point from " + team.name);
   }
   const left = state.homeSide === "right" ? guest.card : home.card;
@@ -72,6 +74,16 @@ function render(nextState) {
   teams.hidden = false;
   options.hidden = !active;
   updateButtons();
+}
+
+function showScoreStatus(message = "") {
+  if (!state.setId) {
+    setStatus("Use /game for set and match controls.");
+  } else if (state.setFinishable) {
+    setStatus("Set ready to finish. Confirm in /game or correct the score here.");
+  } else {
+    setStatus(message);
+  }
 }
 
 async function request(path, cmd) {
@@ -101,13 +113,10 @@ async function refresh() {
     const result = await request("/scoring/state");
     if (version !== refreshVersion) return;
     if (result.status === 200) {
-      const changed = !connected || state?.setId !== result.body.setId;
+      const changed = !connected || state?.setId !== result.body.setId ||
+        state?.setFinishable !== result.body.setFinishable;
       render(result.body);
-      if (!state.setId) {
-        setStatus("Use /game for set and match controls.");
-      } else if (changed && !actionRejected) {
-        setStatus("");
-      }
+      if (changed && (!actionRejected || !state.setId || state.setFinishable)) showScoreStatus();
     } else {
       connected = false;
       actionRejected = false;
@@ -135,9 +144,10 @@ async function submit() {
   try {
     const result = await request("/scoring/actions", pending);
     if (result.status === 200) {
-      setStatus(pending.action === "game:reverse" ? "Sides switched." : "Score saved.");
+      const message = pending.action === "game:reverse" ? "Sides switched." : "Score saved.";
       pending = undefined;
       render(result.body);
+      showScoreStatus(message);
     } else if (result.status >= 500) {
       setStatus("Could not confirm the update. Retry this action.", true);
     } else {

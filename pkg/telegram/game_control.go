@@ -197,12 +197,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 				return nil
 			}
 			setState := game2.SetState{
-				SetScore: game2.SetScore{
-					HomeScore:          txActiveSet.HomeScore,
-					GuestScore:         txActiveSet.GuestScore,
-					SetNumber:          txActiveSet.SetNumber,
-					SideSwitchedInSet5: txGame.SideSwitchedInSet5,
-				},
+				SetScore:   currentSetScore(txGame, txActiveSet),
 				IsFinished: txActiveSet.IsFinished,
 			}
 			res, err := game2.ConfirmSetFinished(toGameState(txGame, phase), setState)
@@ -241,6 +236,13 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "This control message is stale. Run /game.",
+		})
+		return
+	}
+	if errors.Is(err, errSetAwaitingConfirmation) {
+		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   errSetAwaitingConfirmation.Error(),
 		})
 		return
 	}
@@ -333,12 +335,7 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	if activeSet != nil {
 		homeScore = activeSet.HomeScore
 		guestScore = activeSet.GuestScore
-		finishable = game2.IsSetFinishable(game2.SetScore{
-			HomeScore:          activeSet.HomeScore,
-			GuestScore:         activeSet.GuestScore,
-			SetNumber:          activeSet.SetNumber,
-			SideSwitchedInSet5: game.SideSwitchedInSet5,
-		})
+		finishable = game2.IsSetFinishable(currentSetScore(game, activeSet))
 	}
 
 	text := fmt.Sprintf(
@@ -356,16 +353,21 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
 	canAdjustScore := phase == storage.GamePhaseSetInProgress && activeSet != nil
 	if canAdjustScore {
-		rows = append(rows,
-			[]models.InlineKeyboardButton{
-				{Text: fmt.Sprintf("%s -1", homeName), CallbackData: "game:home:-1"},
-				{Text: fmt.Sprintf("%s +1", homeName), CallbackData: "game:home:+1"},
-			},
-			[]models.InlineKeyboardButton{
-				{Text: fmt.Sprintf("%s -1", guestName), CallbackData: "game:guest:-1"},
-				{Text: fmt.Sprintf("%s +1", guestName), CallbackData: "game:guest:+1"},
-			},
-		)
+		homeButtons := []models.InlineKeyboardButton{
+			{Text: fmt.Sprintf("%s -1", homeName), CallbackData: scoreHomeDown},
+		}
+		guestButtons := []models.InlineKeyboardButton{
+			{Text: fmt.Sprintf("%s -1", guestName), CallbackData: scoreGuestDown},
+		}
+		if !finishable {
+			homeButtons = append(homeButtons, models.InlineKeyboardButton{
+				Text: fmt.Sprintf("%s +1", homeName), CallbackData: scoreHomeUp,
+			})
+			guestButtons = append(guestButtons, models.InlineKeyboardButton{
+				Text: fmt.Sprintf("%s +1", guestName), CallbackData: scoreGuestUp,
+			})
+		}
+		rows = append(rows, homeButtons, guestButtons)
 	}
 	if phase == storage.GamePhasePlanned {
 		rows = append(rows, []models.InlineKeyboardButton{

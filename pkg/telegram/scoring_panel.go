@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/smith3v/dash14/pkg/game"
 	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
@@ -43,13 +44,14 @@ type scoringTeam struct {
 }
 
 type scoringState struct {
-	GameID    uint              `json:"gameId"`
-	SetID     uint              `json:"setId"`
-	SetNumber int               `json:"setNumber"`
-	Phase     storage.GamePhase `json:"phase"`
-	HomeSide  string            `json:"homeSide"`
-	Home      scoringTeam       `json:"home"`
-	Guest     scoringTeam       `json:"guest"`
+	GameID        uint              `json:"gameId"`
+	SetID         uint              `json:"setId"`
+	SetNumber     int               `json:"setNumber"`
+	SetFinishable bool              `json:"setFinishable"`
+	Phase         storage.GamePhase `json:"phase"`
+	HomeSide      string            `json:"homeSide"`
+	Home          scoringTeam       `json:"home"`
+	Guest         scoringTeam       `json:"guest"`
 }
 
 type scoringCommand struct {
@@ -184,9 +186,10 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 			GameID: match.ID, SetNumber: match.CurrentSetNumber, Phase: phase, HomeSide: match.HomeTeamSide,
 			Home: scoringTeam{Name: home.Name}, Guest: scoringTeam{Name: guest.Name},
 		}
-		if set != nil {
+		if phase == storage.GamePhaseSetInProgress {
 			state.SetID, state.SetNumber = set.ID, set.SetNumber
 			state.Home.Score, state.Guest.Score = set.HomeScore, set.GuestScore
+			state.SetFinishable = game.IsSetFinishable(currentSetScore(match, set))
 		}
 		return nil
 	})
@@ -210,12 +213,14 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 
 func (p *scoringPanel) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusConflict
-	message := err.Error()
+	var message string
 	switch {
 	case errors.Is(err, errScoringOwner):
 		status, message = http.StatusForbidden, errScoringOwner.Error()
 	case errors.Is(err, errScoringSet):
 		message = errScoringSet.Error()
+	case errors.Is(err, errSetAwaitingConfirmation):
+		message = errSetAwaitingConfirmation.Error()
 	case errors.Is(err, errScoringKey):
 		message = errScoringKey.Error()
 	case errors.Is(err, errNoCurrentGame):

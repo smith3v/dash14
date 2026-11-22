@@ -1,6 +1,8 @@
 package telegram
 
 import (
+	"errors"
+
 	"github.com/smith3v/dash14/pkg/game"
 	"github.com/smith3v/dash14/pkg/storage"
 )
@@ -12,6 +14,8 @@ const (
 	scoreGuestDown = "game:guest:-1"
 	switchSides    = "game:reverse"
 )
+
+var errSetAwaitingConfirmation = errors.New("The set is ready to finish. Use /game to confirm the result or correct the score.")
 
 func isScoringAction(action string) bool {
 	switch action {
@@ -31,11 +35,9 @@ func saveScoringAction(repo *storage.GameRepository, match *storage.Game, set *s
 		return repo.SaveGame(match)
 	}
 
-	score := game.SetScore{
-		HomeScore:          set.HomeScore,
-		GuestScore:         set.GuestScore,
-		SetNumber:          set.SetNumber,
-		SideSwitchedInSet5: match.SideSwitchedInSet5,
+	score := currentSetScore(match, set)
+	if (action == scoreHomeUp || action == scoreGuestUp) && game.IsSetFinishable(score) {
+		return errSetAwaitingConfirmation
 	}
 	var result game.ScoreResult
 	switch action {
@@ -61,6 +63,15 @@ func saveScoringAction(repo *storage.GameRepository, match *storage.Game, set *s
 	}
 	match.SideSwitchedInSet5 = result.Set.SideSwitchedInSet5
 	return repo.SaveGame(match)
+}
+
+func currentSetScore(match *storage.Game, set *storage.GameSet) game.SetScore {
+	return game.SetScore{
+		HomeScore:          set.HomeScore,
+		GuestScore:         set.GuestScore,
+		SetNumber:          set.SetNumber,
+		SideSwitchedInSet5: match.SideSwitchedInSet5,
+	}
 }
 
 func scoringBroadcast(action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {

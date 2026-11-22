@@ -277,3 +277,86 @@ func TestScoringPanelRejectsOldSetAndPreviousOperator(t *testing.T) {
 	}
 	scoringRequest(t, mux, nextAuth, cmd, http.StatusOK)
 }
+
+func TestScoringControlsStopAddingAtWinningScore(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		setNumber  int
+		deuceScore int
+	}{
+		{"regular set", 1, 24},
+		{"fifth set", 5, 14},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := openPlanTestStore(t)
+			fb := &FakeBot{}
+			r := NewRouter(nil, discardLogger(), fb, store.users, store.teams)
+			r.SetGameServices(store.games, nil)
+			mux := http.NewServeMux()
+			r.RegisterScoringPanel(mux, testScoringToken, testScoringURL)
+
+			const owner = 413
+			store.createAdminUser(t, owner, "owner")
+			match := createCurrentPlannedGame(t, store, owner)
+			match.Status, match.CurrentSetNumber = storage.GameStatusInProgress, test.setNumber
+			match.SideSwitchedInSet5 = test.setNumber == 5
+			if err := store.games.SaveGame(match); err != nil {
+				t.Fatal(err)
+			}
+			set := &storage.GameSet{
+				GameID: match.ID, SetNumber: test.setNumber,
+				HomeScore: test.deuceScore, GuestScore: test.deuceScore,
+			}
+			if err := store.games.CreateSet(set); err != nil {
+				t.Fatal(err)
+			}
+			r.handleGame(t.Context(), nil, makeGameMessageUpdate(owner, owner, "/game"))
+			control, err := store.games.GetGameByID(match.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			auth := signedScoringLaunch(testScoringToken, owner, time.Now())
+
+			cmd := scoringCommand{GameID: match.ID, SetID: set.ID, RequestID: uuid.New(), Action: scoreHomeUp}
+			if lead := scoringRequest(t, mux, auth, &cmd, http.StatusOK); lead.SetFinishable || lead.Home.Score != test.deuceScore+1 {
+				t.Fatalf("a one-point lead should remain playable: %+v", lead)
+			}
+			cmd.RequestID = uuid.New()
+			winning := scoringRequest(t, mux, auth, &cmd, http.StatusOK)
+			if !winning.SetFinishable || winning.Home.Score != test.deuceScore+2 {
+				t.Fatalf("winning point should make the set finishable: %+v", winning)
+			}
+
+			for _, action := range []string{scoreHomeUp, scoreGuestUp} {
+				extra := scoringCommand{GameID: match.ID, SetID: set.ID, RequestID: uuid.New(), Action: action}
+				scoringRequest(t, mux, auth, &extra, http.StatusConflict)
+				r.handleGameCallback(t.Context(), nil, makeGameCallbackUpdate(
+					owner, owner, control.ControlMessageID, action, action,
+				))
+			}
+			if retry := scoringRequest(t, mux, auth, &cmd, http.StatusOK); retry != winning {
+				t.Fatalf("extra points or retry changed the winning score: %+v", retry)
+			}
+
+			r.handleGame(t.Context(), nil, makeGameMessageUpdate(owner, owner, "/game"))
+			messages := fb.SentMessages()
+			buttons := keyboardCallbackData(t, messages[len(messages)-1].ReplyMarkup)
+			requireNoCallback(t, buttons, scoreHomeUp)
+			requireNoCallback(t, buttons, scoreGuestUp)
+			requireHasCallback(t, buttons, scoreHomeDown)
+			requireHasCallback(t, buttons, scoreGuestDown)
+			requireHasCallback(t, buttons, "game:set:finish")
+
+			cmd.RequestID, cmd.Action = uuid.New(), scoreHomeDown
+			corrected := scoringRequest(t, mux, auth, &cmd, http.StatusOK)
+			if corrected.SetFinishable || corrected.Home.Score != test.deuceScore+1 {
+				t.Fatalf("correcting the winning score should reopen scoring: %+v", corrected)
+			}
+			cmd.RequestID, cmd.Action = uuid.New(), scoreGuestUp
+			tied := scoringRequest(t, mux, auth, &cmd, http.StatusOK)
+			if tied.SetFinishable || tied.Home.Score != tied.Guest.Score {
+				t.Fatalf("scoring should resume at deuce: %+v", tied)
+			}
+		})
+	}
+}
