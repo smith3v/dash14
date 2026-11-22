@@ -402,8 +402,8 @@ func TestPlan2To8Matches(t *testing.T) {
 			t.Errorf("expected 1 button per row, got %d", len(row))
 		}
 		btn := row[0]
-		if !strings.HasPrefix(btn.CallbackData, "plan:home:") {
-			t.Errorf("expected callback data to start with 'plan:home:', got %q", btn.CallbackData)
+		if !strings.HasPrefix(btn.CallbackData, "plan:home:0:") {
+			t.Errorf("expected callback data to start with 'plan:home:0:', got %q", btn.CallbackData)
 		}
 	}
 
@@ -419,7 +419,7 @@ func TestPlan2To8Matches(t *testing.T) {
 	// Simulate the admin clicking the first button.
 	firstTeamID := inserted[0].ID
 	cbUpd := makeCallbackUpdate(userID, chatID, "cbq1",
-		fmt.Sprintf("plan:home:%d", firstTeamID))
+		fmt.Sprintf("plan:home:0:%d", firstTeamID))
 	r.handlePlanCallback(ctx, nil, cbUpd)
 
 	// Now HomeTeam should be set.
@@ -1010,7 +1010,7 @@ func TestPlanReplacementCallbackCannotApplyTwice(t *testing.T) {
 
 	confirmPlannedGameReplacement(t, r, userID, chatID)
 	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
-	guestCallback := makeCallbackUpdate(userID, chatID, "guest-repeat", fmt.Sprintf("plan:guest:%d", newGuest.ID))
+	guestCallback := makeCallbackUpdate(userID, chatID, "guest-repeat", fmt.Sprintf("plan:guest:0:%d", newGuest.ID))
 	r.handlePlanCallback(context.Background(), nil, guestCallback)
 	r.handlePlanCallback(context.Background(), nil, guestCallback)
 

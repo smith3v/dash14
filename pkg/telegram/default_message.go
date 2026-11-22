@@ -58,6 +58,7 @@ func (r *Router) buildDefaultHelpMessage(userID int64) (string, error) {
 		lines = append(lines,
 			"You can unsubscribe from updates with /stop and subscribe back with /start.",
 		)
+		lines = append(lines, "Use /admin to request admin access.")
 		return strings.Join(lines, "\n"), nil
 	}
 
@@ -70,6 +71,7 @@ func (r *Router) buildDefaultHelpMessage(userID int64) (string, error) {
 	lines = append(lines,
 		"",
 		"Use the following commands:",
+		"/admin to manage admin access",
 		"/plan to plan the next game",
 		"/game to manage the game status and the score",
 		"/takeover to takeover the current game (then use /game)",

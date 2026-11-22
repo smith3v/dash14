@@ -39,6 +39,7 @@ type Router struct {
 	controlEditMu       sync.Mutex
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
 	gameActionMu        sync.Mutex
+	adminConfirmations  sync.Map // map[int64]adminConfirmation
 	broadcastQueueSize  int
 	broadcastMu         sync.Mutex
 	broadcastJobs       []broadcastJob
@@ -76,12 +77,14 @@ func (r *Router) SetGameServices(games GameStore, gameChanged func()) {
 func (r *Router) Register() {
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypeExact, r.handleStart)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/stop", bot.MatchTypeExact, r.handleStop)
+	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/admin", bot.MatchTypeExact, r.handleAdmin)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/plan", bot.MatchTypeExact, r.handlePlan)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/game", bot.MatchTypeExact, r.handleGame)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/takeover", bot.MatchTypeExact, r.handleTakeover)
 	// Non-command text is routed to the plan wizard when the user has an
 	// active plan state; otherwise it is silently ignored.
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "", bot.MatchTypePrefix, r.handlePlanText)
+	r.b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "admin:", bot.MatchTypePrefix, r.handleAdminCallback)
 	// Inline keyboard callbacks for the plan wizard.
 	r.b.RegisterHandler(bot.HandlerTypeCallbackQueryData, "plan:", bot.MatchTypePrefix, r.handlePlanCallback)
 	// Inline callbacks for the /game control message.

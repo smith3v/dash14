@@ -19,8 +19,8 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 	chatID := update.Message.Chat.ID
 	r.logger.InfoContext(ctx, "received /takeover", "user_id", userID)
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
-	if err != nil || !ok {
+	admin, err := r.requireAdmin(ctx, userID, chatID)
+	if err != nil || admin == nil {
 		return
 	}
 	if r.games == nil {
@@ -33,6 +33,9 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 
 	var previousAdminID int64
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
+		if err := repo.RequireAdminVersion(userID, admin.AdminVersion); err != nil {
+			return err
+		}
 		game, err := repo.GetCurrentGame()
 		if err != nil {
 			return err

@@ -9,7 +9,7 @@ import (
 // Migrate creates or updates the storage schema. It is safe to call on an
 // already-migrated database.
 func Migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&Team{}, &User{}, &Game{}, &GameSet{}, &scoringRequest{}); err != nil {
+	if err := db.AutoMigrate(&Team{}, &User{}, &Game{}, &GameSet{}, &scoringRequest{}, &AdminRequest{}, &AdminRequestNotice{}); err != nil {
 		return fmt.Errorf("storage: automigrate: %w", err)
 	}
 
@@ -20,6 +20,14 @@ func Migrate(db *gorm.DB) error {
 			WHERE status <> 'finished'
 		`).Error; err != nil {
 			return fmt.Errorf("storage: create single non-finished game index: %w", err)
+		}
+
+		if err := tx.Exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_requests_one_pending
+			ON admin_requests (requester_id)
+			WHERE status = 'pending'
+		`).Error; err != nil {
+			return fmt.Errorf("storage: create pending admin request index: %w", err)
 		}
 
 		var phaseColumns int

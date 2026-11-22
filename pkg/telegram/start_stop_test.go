@@ -271,7 +271,7 @@ func TestStopRejectsNonPrivateChatWithoutChangingSubscription(t *testing.T) {
 // --- requireAdmin tests -----------------------------------------------------
 
 // TestAuthRequireAdminRejectsUnknownUser verifies that requireAdmin sends a
-// rejection and returns false for a user not present in the database.
+// rejection and returns nil for a user not present in the database.
 func TestAuthRequireAdminRejectsUnknownUser(t *testing.T) {
 	store := openTestStore(t)
 	r, fb := newRouterWithStore(t, store)
@@ -280,12 +280,12 @@ func TestAuthRequireAdminRejectsUnknownUser(t *testing.T) {
 	const userID int64 = 9001
 	const chatID int64 = 8001
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
+	admin, err := r.requireAdmin(ctx, userID, chatID)
 	if err != nil {
 		t.Fatalf("requireAdmin: unexpected error: %v", err)
 	}
-	if ok {
-		t.Error("expected requireAdmin to return false for unknown user, got true")
+	if admin != nil {
+		t.Error("expected requireAdmin to return nil for unknown user")
 	}
 
 	msgs := fb.SentMessages()
@@ -295,7 +295,7 @@ func TestAuthRequireAdminRejectsUnknownUser(t *testing.T) {
 }
 
 // TestAuthRequireAdminRejectsNonAdmin verifies that requireAdmin sends a
-// rejection and returns false for a known but non-admin user.
+// rejection and returns nil for a known but non-admin user.
 func TestAuthRequireAdminRejectsNonAdmin(t *testing.T) {
 	store := openTestStore(t)
 	r, fb := newRouterWithStore(t, store)
@@ -309,12 +309,12 @@ func TestAuthRequireAdminRejectsNonAdmin(t *testing.T) {
 		t.Fatalf("UpsertTelegramUser: %v", err)
 	}
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
+	admin, err := r.requireAdmin(ctx, userID, chatID)
 	if err != nil {
 		t.Fatalf("requireAdmin: unexpected error: %v", err)
 	}
-	if ok {
-		t.Error("expected requireAdmin to return false for non-admin user, got true")
+	if admin != nil {
+		t.Error("expected requireAdmin to return nil for non-admin user")
 	}
 
 	msgs := fb.SentMessages()
@@ -323,7 +323,7 @@ func TestAuthRequireAdminRejectsNonAdmin(t *testing.T) {
 	}
 }
 
-// TestAuthRequireAdminAllowsAdmin verifies that requireAdmin returns true for a
+// TestAuthRequireAdminAllowsAdmin verifies that requireAdmin returns the identity of a
 // user whose IsAdmin flag is set in the database.
 func TestAuthRequireAdminAllowsAdmin(t *testing.T) {
 	store := openTestStore(t)
@@ -336,12 +336,12 @@ func TestAuthRequireAdminAllowsAdmin(t *testing.T) {
 	// Insert an admin user directly (IsAdmin is not settable via the repo API).
 	store.createAdminUser(t, userID, "superadmin")
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
+	admin, err := r.requireAdmin(ctx, userID, chatID)
 	if err != nil {
 		t.Fatalf("requireAdmin: unexpected error: %v", err)
 	}
-	if !ok {
-		t.Error("expected requireAdmin to return true for admin user, got false")
+	if admin == nil || admin.TelegramUserID != userID {
+		t.Error("expected requireAdmin to return the admin identity")
 	}
 
 	// No rejection message should have been sent.

@@ -11,6 +11,7 @@ type User struct {
 	DisplayName    string `gorm:"not null;default:''"`
 	Subscribed     bool   `gorm:"not null;default:false"`
 	IsAdmin        bool   `gorm:"not null;default:false"`
+	AdminVersion   int64  `gorm:"not null;default:0"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
