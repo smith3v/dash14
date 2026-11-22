@@ -75,6 +75,7 @@ func (r *Router) editGameControl(ctx context.Context, gameID uint, fallbackChatI
 		ChatID:      chatID,
 		MessageID:   match.ControlMessageID,
 		Text:        view.Text,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: view.Keyboard,
 	})
 	if err != nil {

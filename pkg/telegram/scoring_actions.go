@@ -73,13 +73,3 @@ func currentSetScore(match *storage.Game, set *storage.GameSet) game.SetScore {
 		SideSwitchedInSet5: match.SideSwitchedInSet5,
 	}
 }
-
-func scoringBroadcast(action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {
-	if action == switchSides {
-		return "Overlay sides reversed for " + home.Name + " vs " + guest.Name
-	}
-	if set != nil {
-		return formatBroadcastScore(match, home, guest, set)
-	}
-	return ""
-}

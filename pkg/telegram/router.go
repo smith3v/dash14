@@ -35,8 +35,11 @@ type Router struct {
 	scoringPanelURL     string
 	controlEditMu       sync.Mutex
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
+	gameActionMu        sync.Mutex
 	broadcastQueueSize  int
-	broadcastJobs       chan broadcastJob
+	broadcastMu         sync.Mutex
+	broadcastJobs       []broadcastJob
+	broadcastReady      *sync.Cond
 	broadcastWorkerOnce sync.Once
 }
 

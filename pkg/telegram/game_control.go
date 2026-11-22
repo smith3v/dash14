@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"html"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -70,6 +70,7 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 	msg, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        view.Text,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: view.Keyboard,
 	})
 	if err != nil {
@@ -108,6 +109,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	if err != nil || !ok {
 		return
 	}
+
+	// Keep committed score snapshots and their broadcasts in the same order
+	// when commands arrive from the bot and scoring panel.
+	r.gameActionMu.Lock()
+	defer r.gameActionMu.Unlock()
 
 	game, home, guest, activeSet, err := r.loadControlContext()
 	if err != nil || game == nil {
@@ -196,12 +202,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		r.gameChanged()
 	}
 
-	broadcastText := gameActionBroadcast(data, committedGame, home, guest, committedSet)
 	r.editGameControl(ctx, committedGame.ID, chatID, cb.Message.Message.Chat.Type == models.ChatTypePrivate)
-
-	if strings.TrimSpace(broadcastText) != "" {
-		r.BroadcastExcept(ctx, broadcastText, committedGame.CurrentAdminUserID)
-	}
+	r.enqueueGameBroadcast(ctx, data, committedGame, home, guest, committedSet)
 }
 
 var errUnhandledGameCallback = errors.New("telegram: unhandled game callback")
@@ -213,14 +215,15 @@ type controlView struct {
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
 	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
+	homeText, guestText := html.EscapeString(homeName), html.EscapeString(guestName)
 
 	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
 			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
 			game.HomeSetsWon,
 			game.GuestSetsWon,
-			homeName,
-			guestName,
+			homeText,
+			guestText,
 		)
 		return controlView{
 			Text:     text,
@@ -238,15 +241,15 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\nSet %d | Score %d-%d\nSets %d-%d\nHome: %s\nGuest: %s",
+		"Game controls\nPhase: %s\n<b>Set %d · %d–%d</b>\nSets %d-%d\nHome: %s\nGuest: %s",
 		phase,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
-		homeName,
-		guestName,
+		homeText,
+		guestText,
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
@@ -332,14 +335,17 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func formatBroadcastScore(game *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {
+func formatBroadcastScore(game *storage.Game, matchup string, set *storage.GameSet) string {
+	setLabel := fmt.Sprintf("Set %d", set.SetNumber)
+	if set.IsFinished {
+		setLabel += " finished"
+	}
 	return fmt.Sprintf(
-		"🏠 %s <b>%d-%d</b> ✈️ %s\n<i>Current set: %d | Game score: %d-%d</i>",
-		home.Name,
+		"%s\n<b>%s · %d–%d</b>\n<i>Sets won: %d–%d</i>",
+		matchup,
+		setLabel,
 		set.HomeScore,
 		set.GuestScore,
-		guest.Name,
-		game.CurrentSetNumber,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
 	)

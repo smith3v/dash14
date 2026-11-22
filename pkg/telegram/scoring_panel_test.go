@@ -191,12 +191,12 @@ func TestScoringPanelSavesOnceAndKeepsTeamIdentityThroughSwitches(t *testing.T) 
 		t.Fatalf("unexpected state after fifth-set switch: %+v", state)
 	}
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
-	if got := fb.SentMessages()[1]; got.ChatID != int64(subscriber) || !strings.Contains(got.Text, "<b>8-7</b>") {
+	if got := fb.SentMessages()[1]; got.ChatID != int64(subscriber) || !strings.Contains(got.Text, "<b>Set 5 · 8–7</b>") {
 		t.Fatalf("unexpected subscriber score: %+v", got)
 	}
 
 	waitForCondition(t, "bot control edit", func() bool { return len(fb.EditedMessages()) > 0 })
-	if got := fb.EditedMessages()[0].Text; !strings.Contains(got, "Score 8-7") {
+	if got := fb.EditedMessages()[0].Text; !strings.Contains(got, "<b>Set 5 · 8–7</b>") {
 		t.Fatalf("unexpected bot score: %q", got)
 	}
 
@@ -221,6 +221,16 @@ func TestScoringPanelSavesOnceAndKeepsTeamIdentityThroughSwitches(t *testing.T) 
 	if state.HomeSide != "left" || state.Home.Score != 7 || state.Guest.Score != 7 {
 		t.Fatalf("correction targeted the wrong team: %+v", state)
 	}
+
+	scoreboard := fb.SentMessages()[1]
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 5 · 7–7</b>")
+	current, err := store.games.GetGameByID(match.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(owner, owner,
+		current.ControlMessageID, "bot-point", scoreGuestUp))
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 5 · 7–8</b>")
 }
 
 func TestScoringPanelRejectsOldSetAndPreviousOperator(t *testing.T) {

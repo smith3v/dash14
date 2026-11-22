@@ -153,6 +153,8 @@ func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
 		scoringJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid scoring action."})
 		return
 	}
+	p.router.gameActionMu.Lock()
+	defer p.router.gameActionMu.Unlock()
 	p.respond(w, r, userID, cmd.GameID, &cmd)
 }
 
@@ -165,8 +167,9 @@ func (cmd scoringCommand) validAction() bool {
 
 func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID int64, gameID uint, cmd *scoringCommand) {
 	var state scoringState
-	var broadcast string
-	changed := false
+	var committedGame *storage.Game
+	var committedSet *storage.GameSet
+	var home, guest *storage.Team
 	err := p.router.games.WithinTx(func(repo *storage.GameRepository) error {
 		var match *storage.Game
 		var err error
@@ -194,17 +197,18 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if err != nil {
 			return err
 		}
-		home, guest, err := repo.GetGameTeams(match)
+		home, guest, err = repo.GetGameTeams(match)
 		if err != nil {
 			return err
 		}
 		if cmd != nil {
+			var changed bool
 			set, changed, err = cmd.apply(repo, match, set)
 			if err != nil {
 				return err
 			}
 			if changed {
-				broadcast = gameActionBroadcast(cmd.Action, match, home, guest, set)
+				committedGame, committedSet = match, set
 			}
 		}
 		state = panelGameState(match, set, home, guest)
@@ -215,13 +219,11 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		return
 	}
 
-	if changed {
+	if committedGame != nil {
 		if p.router.gameChanged != nil {
 			p.router.gameChanged()
 		}
-		if broadcast != "" {
-			p.router.BroadcastExcept(r.Context(), broadcast, userID)
-		}
+		p.router.enqueueGameBroadcast(r.Context(), cmd.Action, committedGame, home, guest, committedSet)
 		select {
 		case p.controlEdit <- state.GameID:
 		default:

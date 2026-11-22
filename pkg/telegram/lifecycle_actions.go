@@ -125,7 +125,7 @@ func saveLifecycleAction(repo *storage.GameRepository, match *storage.Game, set 
 		return nil, err
 	}
 	if newSet.SetNumber == 0 {
-		return nil, nil
+		return set, nil
 	}
 	set = &storage.GameSet{
 		GameID: match.ID, SetNumber: newSet.SetNumber,
@@ -135,21 +135,4 @@ func saveLifecycleAction(repo *storage.GameRepository, match *storage.Game, set 
 		return nil, err
 	}
 	return set, nil
-}
-
-func gameActionBroadcast(action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet) string {
-	switch action {
-	case startMatch:
-		return fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
-	case startNextSet:
-		return fmt.Sprintf("Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
-			set.SetNumber, home.Name, guest.Name, match.HomeSetsWon, match.GuestSetsWon)
-	case finishSet:
-		return ""
-	case finishMatch:
-		return fmt.Sprintf("Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
-			home.Name, match.HomeSetsWon, match.GuestSetsWon, guest.Name)
-	default:
-		return scoringBroadcast(action, match, home, guest, set)
-	}
 }
