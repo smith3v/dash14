@@ -71,6 +71,7 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 	msg, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        view.Text,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: view.Keyboard,
 	})
 	if err != nil {
@@ -305,6 +306,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		ChatID:      chatID,
 		MessageID:   game.ControlMessageID,
 		Text:        view.Text,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: view.Keyboard,
 	})
 	if editErr != nil {
@@ -350,14 +352,15 @@ type controlView struct {
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
 	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
+	homeText, guestText := html.EscapeString(homeName), html.EscapeString(guestName)
 
 	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
 			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
 			game.HomeSetsWon,
 			game.GuestSetsWon,
-			homeName,
-			guestName,
+			homeText,
+			guestText,
 		)
 		return controlView{
 			Text:     text,
@@ -380,15 +383,15 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\nSet %d | Score %d-%d\nSets %d-%d\nHome: %s\nGuest: %s",
+		"Game controls\nPhase: %s\n<b>Set %d · %d–%d</b>\nSets %d-%d\nHome: %s\nGuest: %s",
 		phase,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
-		homeName,
-		guestName,
+		homeText,
+		guestText,
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)

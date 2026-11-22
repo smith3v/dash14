@@ -118,6 +118,9 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	if !strings.Contains(last.Text, "Game controls") {
 		t.Fatalf("expected control message text, got %q", last.Text)
 	}
+	if last.ParseMode != models.ParseModeHTML || !strings.Contains(last.Text, "\n<b>Set 1 · 0–0</b>\n") {
+		t.Fatalf("expected a bold set score in the control message, got %q (%q)", last.Text, last.ParseMode)
+	}
 	if last.ReplyMarkup == nil {
 		t.Fatal("expected inline keyboard on control message")
 	}
@@ -345,7 +348,7 @@ func TestGameControlRejectsNonOwner(t *testing.T) {
 
 func TestGameControlScoreButtonRouting(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, _, _ := newPlanRouter(t, store)
+	r, fb, _ := newPlanRouter(t, store)
 	ctx := context.Background()
 
 	const userID int64 = 7301
@@ -370,6 +373,16 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 	if active.HomeScore != 1 || active.GuestScore != 1 {
 		t.Fatalf("unexpected scores after callbacks: home=%d guest=%d", active.HomeScore, active.GuestScore)
+	}
+
+	edits := fb.EditedMessages()
+	if len(edits) == 0 {
+		t.Fatal("expected the control message to be edited")
+	}
+	last := edits[len(edits)-1]
+	if last.ChatID != chatID || last.MessageID != ctrlID || last.ParseMode != models.ParseModeHTML ||
+		!strings.Contains(last.Text, "\n<b>Set 1 · 1–1</b>\n") {
+		t.Fatalf("expected a bold set score on the edited control message, got %+v", last)
 	}
 }
 
@@ -550,7 +563,11 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 	ctrlID := current.ControlMessageID
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
-	scoreboard := fb.SentMessages()[1]
+	messages := fb.SentMessages()
+	if !strings.Contains(messages[0].Text, "Home: A&amp;B &lt;Home&gt;") {
+		t.Fatalf("expected escaped team name in the control message, got %q", messages[0].Text)
+	}
+	scoreboard := messages[1]
 	const matchup = "🏠 A&amp;B &lt;Home&gt; vs ✈️ Control Guest"
 	if scoreboard.ChatID != subID || scoreboard.ParseMode != models.ParseModeHTML ||
 		scoreboard.Text != matchup+"\n<b>Set 1 · 0–0</b>\n<i>Sets won: 0–0</i>" {
