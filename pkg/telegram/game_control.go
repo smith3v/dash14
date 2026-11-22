@@ -317,9 +317,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
 	}
 
-	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
 	if data == "game:reverse" {
-		text := fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName)
+		text := fmt.Sprintf("Overlay sides reversed for %s vs %s", html.EscapeString(home.Name), html.EscapeString(guest.Name))
 		r.BroadcastExcept(ctx, text, game.CurrentAdminUserID)
 		return
 	}
@@ -328,7 +327,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	matchup := fmt.Sprintf("🏠 %s vs ✈️ %s", homeName, guestName)
+	matchup := formatMatchup(home.Name, guest.Name)
 	r.enqueueBroadcast(ctx, broadcastJob{
 		text:           formatBroadcastScore(game, matchup, sets),
 		excludeUserIDs: []int64{game.CurrentAdminUserID},
@@ -346,15 +345,14 @@ type controlView struct {
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
 	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
-	homeText, guestText := html.EscapeString(homeName), html.EscapeString(guestName)
+	matchup := formatMatchup(homeName, guestName)
 
 	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
-			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
+			"Game finished\n%s\nFinal sets 🏠 %d – ✈️ %d",
+			matchup,
 			game.HomeSetsWon,
 			game.GuestSetsWon,
-			homeText,
-			guestText,
 		)
 		return controlView{
 			Text:     text,
@@ -377,15 +375,14 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\n<b>Set %d · %d–%d</b>\nSets %d-%d\nHome: %s\nGuest: %s",
+		"Game controls\nPhase: %s\n%s\n<b>Set %d · 🏠 %d – ✈️ %d</b>\nSets %d–%d",
 		phase,
+		matchup,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
-		homeText,
-		guestText,
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
@@ -486,6 +483,10 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.CurrentSetNumber = src.CurrentSetNumber
 	dst.Status = storage.GameStatus(src.Status)
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
+}
+
+func formatMatchup(homeName, guestName string) string {
+	return fmt.Sprintf("🏠 %s vs ✈️ %s", html.EscapeString(homeName), html.EscapeString(guestName))
 }
 
 func formatBroadcastScore(game *storage.Game, matchup string, sets []storage.GameSet) string {

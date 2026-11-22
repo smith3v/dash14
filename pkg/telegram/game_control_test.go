@@ -118,8 +118,9 @@ func TestGameControlCurrentAdminAccess(t *testing.T) {
 	if !strings.Contains(last.Text, "Game controls") {
 		t.Fatalf("expected control message text, got %q", last.Text)
 	}
-	if last.ParseMode != models.ParseModeHTML || !strings.Contains(last.Text, "\n<b>Set 1 · 0–0</b>\n") {
-		t.Fatalf("expected a bold set score in the control message, got %q (%q)", last.Text, last.ParseMode)
+	if last.ParseMode != models.ParseModeHTML ||
+		!strings.Contains(last.Text, "\n🏠 Control Home vs ✈️ Control Guest\n<b>Set 1 · 🏠 0 – ✈️ 0</b>\n") {
+		t.Fatalf("expected the matchup and labeled score in the control message, got %q (%q)", last.Text, last.ParseMode)
 	}
 	if last.ReplyMarkup == nil {
 		t.Fatal("expected inline keyboard on control message")
@@ -365,13 +366,14 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-start", "game:start"))
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-home", "game:home:+1"))
+	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-home-again", "game:home:+1"))
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(userID, chatID, ctrlID, "cb-guest", "game:guest:+1"))
 
 	active, err := store.games.GetActiveSet(game.ID)
 	if err != nil {
 		t.Fatalf("GetActiveSet: %v", err)
 	}
-	if active.HomeScore != 1 || active.GuestScore != 1 {
+	if active.HomeScore != 2 || active.GuestScore != 1 {
 		t.Fatalf("unexpected scores after callbacks: home=%d guest=%d", active.HomeScore, active.GuestScore)
 	}
 
@@ -381,7 +383,7 @@ func TestGameControlScoreButtonRouting(t *testing.T) {
 	}
 	last := edits[len(edits)-1]
 	if last.ChatID != chatID || last.MessageID != ctrlID || last.ParseMode != models.ParseModeHTML ||
-		!strings.Contains(last.Text, "\n<b>Set 1 · 1–1</b>\n") {
+		!strings.Contains(last.Text, "\n<b>Set 1 · 🏠 2 – ✈️ 1</b>\n") {
 		t.Fatalf("expected a bold set score on the edited control message, got %+v", last)
 	}
 }
@@ -564,7 +566,7 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 	messages := fb.SentMessages()
-	if !strings.Contains(messages[0].Text, "Home: A&amp;B &lt;Home&gt;") {
+	if !strings.Contains(messages[0].Text, "🏠 A&amp;B &lt;Home&gt; vs ✈️ Control Guest") {
 		t.Fatalf("expected escaped team name in the control message, got %q", messages[0].Text)
 	}
 	scoreboard := messages[1]
@@ -789,8 +791,8 @@ func TestGameControlFinishEditsMessageWithoutControls(t *testing.T) {
 		t.Fatal("expected edited control message after game finish")
 	}
 	last := edited[len(edited)-1]
-	if !strings.Contains(last.Text, "Game finished") {
-		t.Fatalf("expected finish confirmation text, got %q", last.Text)
+	if last.Text != "Game finished\n🏠 Control Home vs ✈️ Control Guest\nFinal sets 🏠 4 – ✈️ 0" {
+		t.Fatalf("expected the final score with team sides, got %q", last.Text)
 	}
 	kb, ok := last.ReplyMarkup.(*models.InlineKeyboardMarkup)
 	if !ok {
