@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -116,7 +117,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	r.gameCallbackMu.Lock()
 	defer r.gameCallbackMu.Unlock()
 
-	game, home, guest, activeSet, err := r.loadControlContext()
+	game, home, guest, _, err := r.loadControlContext()
 	if err != nil || game == nil {
 		return
 	}
@@ -135,7 +136,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	var finishedSet *storage.GameSet
 	scoreChange := false
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
 		txGame, err := repo.GetGameByID(game.ID)
@@ -247,7 +247,6 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			if err := repo.SaveSet(txActiveSet); err != nil {
 				return err
 			}
-			finishedSet = txActiveSet
 			applyGameState(txGame, res.Game)
 			return repo.SaveGame(txGame)
 
@@ -293,13 +292,17 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		r.logger.ErrorContext(ctx, "handleGameCallback: reload game failed", "game_id", game.ID, "action", data, "err", err)
 		return
 	}
-	activeSet, err = r.games.GetActiveSet(game.ID)
+	sets, err := r.games.ListSetsByGameID(game.ID)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			r.logger.ErrorContext(ctx, "handleGameCallback: reload active set failed", "game_id", game.ID, "action", data, "err", err)
-			return
+		r.logger.ErrorContext(ctx, "handleGameCallback: reload sets failed", "game_id", game.ID, "action", data, "err", err)
+		return
+	}
+	var activeSet *storage.GameSet
+	for i := range sets {
+		if !sets[i].IsFinished {
+			activeSet = &sets[i]
+			break
 		}
-		activeSet = nil
 	}
 	view := buildGameControlMessage(game, home.Name, guest.Name, activeSet)
 	_, editErr := r.client.EditMessageText(ctx, &bot.EditMessageTextParams{
@@ -314,29 +317,19 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			"game_id", game.ID, "message_id", game.ControlMessageID, "err", editErr)
 	}
 
-	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
 	if data == "game:reverse" {
-		text := fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName)
+		text := fmt.Sprintf("Overlay sides reversed for %s vs %s", html.EscapeString(home.Name), html.EscapeString(guest.Name))
 		r.BroadcastExcept(ctx, text, game.CurrentAdminUserID)
 		return
 	}
 
-	if finishedSet != nil {
-		activeSet = finishedSet
-	}
-	matchup := fmt.Sprintf("🏠 %s vs ✈️ %s", homeName, guestName)
-	var text string
-	switch {
-	case game.Status == storage.GameStatusFinished:
-		text = fmt.Sprintf("%s\n<b>Final · %d–%d</b>", matchup, game.HomeSetsWon, game.GuestSetsWon)
-	case activeSet != nil && game.Status == storage.GameStatusInProgress:
-		text = formatBroadcastScore(game, matchup, activeSet)
-	default:
+	if game.Status == storage.GameStatusPlanned {
 		return
 	}
 
+	matchup := formatMatchup(home.Name, guest.Name)
 	r.enqueueBroadcast(ctx, broadcastJob{
-		text:           text,
+		text:           formatBroadcastScore(game, matchup, sets),
 		excludeUserIDs: []int64{game.CurrentAdminUserID},
 		gameID:         game.ID,
 		scoreChange:    scoreChange,
@@ -352,15 +345,14 @@ type controlView struct {
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
 	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
-	homeText, guestText := html.EscapeString(homeName), html.EscapeString(guestName)
+	matchup := formatMatchup(homeName, guestName)
 
 	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
-			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
+			"Game finished\n%s\nFinal sets 🏠 %d – ✈️ %d",
+			matchup,
 			game.HomeSetsWon,
 			game.GuestSetsWon,
-			homeText,
-			guestText,
 		)
 		return controlView{
 			Text:     text,
@@ -383,15 +375,14 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\n<b>Set %d · %d–%d</b>\nSets %d-%d\nHome: %s\nGuest: %s",
+		"Game controls\nPhase: %s\n%s\n\n<b>Set %d · 🏠 %d – ✈️ %d</b>\n\nSets %d–%d",
 		phase,
+		matchup,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
-		homeText,
-		guestText,
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
@@ -494,18 +485,24 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func formatBroadcastScore(game *storage.Game, matchup string, set *storage.GameSet) string {
-	setLabel := fmt.Sprintf("Set %d", set.SetNumber)
-	if set.IsFinished {
-		setLabel += " finished"
+func formatMatchup(homeName, guestName string) string {
+	return fmt.Sprintf("🏠 %s vs ✈️ %s", html.EscapeString(homeName), html.EscapeString(guestName))
+}
+
+func formatBroadcastScore(game *storage.Game, matchup string, sets []storage.GameSet) string {
+	lines := make([]string, 0, len(sets)+2)
+	lines = append(lines, matchup)
+	for _, set := range sets {
+		line := fmt.Sprintf("Set %d · %d–%d", set.SetNumber, set.HomeScore, set.GuestScore)
+		if game.Status == storage.GameStatusInProgress && !set.IsFinished {
+			line = "<b>" + line + "</b>"
+		}
+		lines = append(lines, line)
 	}
-	return fmt.Sprintf(
-		"%s\n<b>%s · %d–%d</b>\n<i>Sets won: %d–%d</i>",
-		matchup,
-		setLabel,
-		set.HomeScore,
-		set.GuestScore,
-		game.HomeSetsWon,
-		game.GuestSetsWon,
-	)
+	if game.Status == storage.GameStatusFinished {
+		lines = append(lines, fmt.Sprintf("<b>Final · %d–%d</b>", game.HomeSetsWon, game.GuestSetsWon))
+	} else {
+		lines = append(lines, fmt.Sprintf("<i>Sets won: %d–%d</i>", game.HomeSetsWon, game.GuestSetsWon))
+	}
+	return strings.Join(lines, "\n")
 }

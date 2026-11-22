@@ -17,6 +17,7 @@ type GameStore interface {
 	GetCurrentGame() (*storage.Game, error)
 	GetGameByID(id uint) (*storage.Game, error)
 	GetActiveSet(gameID uint) (*storage.GameSet, error)
+	ListSetsByGameID(gameID uint) ([]storage.GameSet, error)
 	SaveGame(game *storage.Game) error
 	SaveSet(set *storage.GameSet) error
 }
