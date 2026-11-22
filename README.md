@@ -16,7 +16,7 @@ It stores match state in SQLite, serves OBS-ready overlays over HTTP, and expose
 
 ## Requirements
 
-- Go `1.27.3`
+- Go `1.27.4`
 - Telegram bot token (from BotFather)
 - Local filesystem access for:
   - SQLite DB file
