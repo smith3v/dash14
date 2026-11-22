@@ -50,6 +50,9 @@ func (g *txFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inn
 func (g *txFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
 }
+func (g *txFailGames) ListSetsByGameID(gameID uint) ([]storage.GameSet, error) {
+	return g.inner.ListSetsByGameID(gameID)
+}
 func (g *txFailGames) SaveGame(game *storage.Game) error  { return g.inner.SaveGame(game) }
 func (g *txFailGames) SaveSet(set *storage.GameSet) error { return g.inner.SaveSet(set) }
 

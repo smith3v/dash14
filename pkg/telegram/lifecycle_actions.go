@@ -123,7 +123,7 @@ func saveLifecycleAction(repo *storage.GameRepository, match *storage.Game, set 
 		return nil, err
 	}
 	if newSet.SetNumber == 0 {
-		return set, nil
+		return nil, nil
 	}
 	set = &storage.GameSet{
 		GameID: match.ID, SetNumber: newSet.SetNumber,

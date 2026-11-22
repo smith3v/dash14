@@ -197,7 +197,7 @@ func TestScoringPanelSavesOnceAndKeepsTeamIdentityThroughSwitches(t *testing.T) 
 	}
 
 	waitForCondition(t, "bot control edit", func() bool { return len(fb.EditedMessages()) > 0 })
-	if got := fb.EditedMessages()[0].Text; !strings.Contains(got, "<b>Set 5 · 8–7</b>") {
+	if got := fb.EditedMessages()[0].Text; !strings.Contains(got, "<b>Set 5 · 🏠 8 – ✈️ 7</b>") {
 		t.Fatalf("unexpected bot score: %q", got)
 	}
 
@@ -391,6 +391,10 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 	const firstOperator, nextOperator = 520, 521
 	store.createAdminUser(t, firstOperator, "first")
 	store.createAdminUser(t, nextOperator, "next")
+	const subscriber = 522
+	if err := store.users.UpsertTelegramUser(subscriber, "subscriber", "Subscriber"); err != nil {
+		t.Fatal(err)
+	}
 	match := createCurrentPlannedGame(t, store, firstOperator)
 	firstAuth := signedScoringLaunch(testScoringToken, firstOperator, time.Now())
 	nextAuth := signedScoringLaunch(testScoringToken, nextOperator, time.Now())
@@ -514,6 +518,19 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 		final.Home.SetsWon != 3 || final.Guest.SetsWon != 2 {
 		t.Fatalf("unexpected final result: %+v", final)
 	}
+	var scoreboard sentMessage
+	for _, message := range fb.SentMessages() {
+		if message.ChatID == int64(subscriber) {
+			scoreboard = message
+			break
+		}
+	}
+	if scoreboard.MessageID == 0 {
+		t.Fatal("expected an initial subscriber scoreboard")
+	}
+	waitForScoreboardEdit(t, fb, scoreboard, "Set 1 · 25–23\nSet 2 · 23–25\nSet 3 · 25–23\n"+
+		"Set 4 · 23–25\nSet 5 · 15–13\n<b>Final · 3–2</b>")
+
 	scoringRequest(t, mux, auth, nil, http.StatusConflict)
 	if got := boundState(auth, http.StatusOK); got != final {
 		t.Fatalf("panel lost the final result: %+v", got)

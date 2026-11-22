@@ -43,7 +43,7 @@ func (r *Router) BroadcastExcept(ctx context.Context, text string, excludeUserID
 	})
 }
 
-func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match *storage.Game, home, guest *storage.Team, set *storage.GameSet, after <-chan struct{}) {
+func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match *storage.Game, home, guest *storage.Team, sets []storage.GameSet, after <-chan struct{}) {
 	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
 	if action == switchSides {
 		r.enqueueBroadcast(ctx, broadcastJob{
@@ -54,18 +54,12 @@ func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match 
 		return
 	}
 
-	matchup := fmt.Sprintf("🏠 %s vs ✈️ %s", homeName, guestName)
-	var text string
-	switch {
-	case match.Status == storage.GameStatusFinished:
-		text = fmt.Sprintf("%s\n<b>Final · %d–%d</b>", matchup, match.HomeSetsWon, match.GuestSetsWon)
-	case set != nil && match.Status == storage.GameStatusInProgress:
-		text = formatBroadcastScore(match, matchup, set)
-	default:
+	if match.Status == storage.GameStatusPlanned {
 		return
 	}
+	matchup := formatMatchup(home.Name, guest.Name)
 	r.enqueueBroadcast(ctx, broadcastJob{
-		text:           text,
+		text:           formatBroadcastScore(match, matchup, sets),
 		excludeUserIDs: []int64{match.CurrentAdminUserID},
 		gameID:         match.ID,
 		scoreChange:    isScoringAction(action),

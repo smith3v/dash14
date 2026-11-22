@@ -133,7 +133,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	// Serialize committed snapshots and their broadcasts across both surfaces.
 	r.gameActionMu.Lock()
 	var committedGame *storage.Game
-	var committedSet *storage.GameSet
+	var committedSets []storage.GameSet
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
 		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
@@ -153,7 +153,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 
 		switch {
 		case isLifecycleAction(data):
-			txSet, err = saveLifecycleAction(repo, txGame, txSet, data)
+			_, err = saveLifecycleAction(repo, txGame, txSet, data)
 		case data == switchSides || isScoringAction(data) &&
 			txGame.EffectivePhase(txSet != nil) == storage.GamePhaseSetInProgress:
 			err = saveScoringAction(repo, txGame, txSet, data)
@@ -164,7 +164,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			return err
 		}
 
-		committedGame, committedSet = txGame, txSet
+		committedSets, err = repo.ListSetsByGameID(txGame.ID)
+		if err != nil {
+			return err
+		}
+		committedGame = txGame
 		return nil
 	})
 	var edited chan struct{}
@@ -173,7 +177,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			r.gameChanged()
 		}
 		edited = make(chan struct{})
-		r.enqueueGameBroadcast(ctx, data, committedGame, home, guest, committedSet, edited)
+		r.enqueueGameBroadcast(ctx, data, committedGame, home, guest, committedSets, edited)
 	}
 	r.gameActionMu.Unlock()
 	if errors.Is(err, errUnhandledGameCallback) {
@@ -216,15 +220,14 @@ type controlView struct {
 
 func buildGameControlMessage(game *storage.Game, homeName, guestName string, activeSet *storage.GameSet) controlView {
 	phase := game.EffectivePhase(activeSet != nil && !activeSet.IsFinished)
-	homeText, guestText := html.EscapeString(homeName), html.EscapeString(guestName)
+	matchup := formatMatchup(homeName, guestName)
 
 	if phase == storage.GamePhaseFinished {
 		text := fmt.Sprintf(
-			"Game finished\nFinal sets %d-%d\nHome: %s\nGuest: %s",
+			"Game finished\n%s\nFinal sets 🏠 %d – ✈️ %d",
+			matchup,
 			game.HomeSetsWon,
 			game.GuestSetsWon,
-			homeText,
-			guestText,
 		)
 		return controlView{
 			Text:     text,
@@ -242,15 +245,14 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 	}
 
 	text := fmt.Sprintf(
-		"Game controls\nPhase: %s\n<b>Set %d · %d–%d</b>\nSets %d-%d\nHome: %s\nGuest: %s",
+		"Game controls\nPhase: %s\n%s\n\n<b>Set %d · 🏠 %d – ✈️ %d</b>\n\nSets %d–%d",
 		phase,
+		matchup,
 		game.CurrentSetNumber,
 		homeScore,
 		guestScore,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
-		homeText,
-		guestText,
 	)
 
 	rows := make([][]models.InlineKeyboardButton, 0, 5)
@@ -336,18 +338,24 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func formatBroadcastScore(game *storage.Game, matchup string, set *storage.GameSet) string {
-	setLabel := fmt.Sprintf("Set %d", set.SetNumber)
-	if set.IsFinished {
-		setLabel += " finished"
+func formatMatchup(homeName, guestName string) string {
+	return fmt.Sprintf("🏠 %s vs ✈️ %s", html.EscapeString(homeName), html.EscapeString(guestName))
+}
+
+func formatBroadcastScore(game *storage.Game, matchup string, sets []storage.GameSet) string {
+	lines := make([]string, 0, len(sets)+2)
+	lines = append(lines, matchup)
+	for _, set := range sets {
+		line := fmt.Sprintf("Set %d · %d–%d", set.SetNumber, set.HomeScore, set.GuestScore)
+		if game.Status == storage.GameStatusInProgress && !set.IsFinished {
+			line = "<b>" + line + "</b>"
+		}
+		lines = append(lines, line)
 	}
-	return fmt.Sprintf(
-		"%s\n<b>%s · %d–%d</b>\n<i>Sets won: %d–%d</i>",
-		matchup,
-		setLabel,
-		set.HomeScore,
-		set.GuestScore,
-		game.HomeSetsWon,
-		game.GuestSetsWon,
-	)
+	if game.Status == storage.GameStatusFinished {
+		lines = append(lines, fmt.Sprintf("<b>Final · %d–%d</b>", game.HomeSetsWon, game.GuestSetsWon))
+	} else {
+		lines = append(lines, fmt.Sprintf("<i>Sets won: %d–%d</i>", game.HomeSetsWon, game.GuestSetsWon))
+	}
+	return strings.Join(lines, "\n")
 }

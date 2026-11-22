@@ -171,7 +171,7 @@ func (cmd scoringCommand) validAction() bool {
 func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID int64, gameID uint, cmd *scoringCommand) {
 	var state scoringState
 	var committedGame *storage.Game
-	var committedSet *storage.GameSet
+	var committedSets []storage.GameSet
 	var home, guest *storage.Team
 	err := p.router.games.WithinTxContext(r.Context(), func(repo *storage.GameRepository) error {
 		var match *storage.Game
@@ -211,7 +211,11 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 				return err
 			}
 			if changed {
-				committedGame, committedSet = match, set
+				committedSets, err = repo.ListSetsByGameID(match.ID)
+				if err != nil {
+					return err
+				}
+				committedGame = match
 			}
 		}
 		state = panelGameState(match, set, home, guest)
@@ -228,7 +232,7 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if p.router.gameChanged != nil {
 			p.router.gameChanged()
 		}
-		p.router.enqueueGameBroadcast(r.Context(), cmd.Action, committedGame, home, guest, committedSet, nil)
+		p.router.enqueueGameBroadcast(r.Context(), cmd.Action, committedGame, home, guest, committedSets, nil)
 		select {
 		case p.controlEdit <- state.GameID:
 		default:
