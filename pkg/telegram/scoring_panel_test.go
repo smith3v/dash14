@@ -436,6 +436,16 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 	if state.SetID == 0 || state.SetNumber != 1 || state.Transition.Action != "" {
 		t.Fatalf("expected a playable first set: %+v", state)
 	}
+	var scoreboard sentMessage
+	waitForCondition(t, "initial subscriber scoreboard", func() bool {
+		for _, message := range fb.SentMessages() {
+			if message.ChatID == int64(subscriber) {
+				scoreboard = message
+				return true
+			}
+		}
+		return false
+	})
 	if retry := scoringRequest(t, mux, auth, &start, http.StatusOK); retry != state {
 		t.Fatalf("retry changed first set: %+v", retry)
 	}
@@ -517,16 +527,6 @@ func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
 	if final.Phase != storage.GamePhaseFinished || final.Transition.Action != "" ||
 		final.Home.SetsWon != 3 || final.Guest.SetsWon != 2 {
 		t.Fatalf("unexpected final result: %+v", final)
-	}
-	var scoreboard sentMessage
-	for _, message := range fb.SentMessages() {
-		if message.ChatID == int64(subscriber) {
-			scoreboard = message
-			break
-		}
-	}
-	if scoreboard.MessageID == 0 {
-		t.Fatal("expected an initial subscriber scoreboard")
 	}
 	waitForScoreboardEdit(t, fb, scoreboard, "Set 1 · 25–23\nSet 2 · 23–25\nSet 3 · 25–23\n"+
 		"Set 4 · 23–25\nSet 5 · 15–13\n<b>Final · 3–2</b>")
