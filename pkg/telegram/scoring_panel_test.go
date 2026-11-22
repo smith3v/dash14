@@ -79,7 +79,7 @@ func TestScoringPanelLaunchIsPrivate(t *testing.T) {
 
 	const owner int64 = 112
 	store.createAdminUser(t, owner, "owner")
-	createCurrentPlannedGame(t, store, owner)
+	match := createCurrentPlannedGame(t, store, owner)
 	for _, chatType := range []models.ChatType{models.ChatTypePrivate, models.ChatTypeGroup} {
 		update := makeGameMessageUpdate(owner, owner, "/game")
 		update.Message.Chat.Type = chatType
@@ -94,7 +94,7 @@ func TestScoringPanelLaunchIsPrivate(t *testing.T) {
 				}
 			}
 		}
-		if chatType == models.ChatTypePrivate && panelURL != testScoringURL ||
+		if chatType == models.ChatTypePrivate && panelURL != fmt.Sprintf("%s?gameId=%d", testScoringURL, match.ID) ||
 			chatType == models.ChatTypeGroup && panelURL != "" {
 			t.Fatalf("%s chat got scoring URL %q", chatType, panelURL)
 		}
@@ -358,5 +358,145 @@ func TestScoringControlsStopAddingAtWinningScore(t *testing.T) {
 				t.Fatalf("scoring should resume at deuce: %+v", tied)
 			}
 		})
+	}
+}
+
+func TestScoringPanelPlaysMatchThroughTakeoverAndFinish(t *testing.T) {
+	store := openPlanTestStore(t)
+	fb := &FakeBot{}
+	r := NewRouter(nil, discardLogger(), fb, store.users, store.teams)
+	r.SetGameServices(store.games, nil)
+	mux := http.NewServeMux()
+	r.RegisterScoringPanel(mux, testScoringToken, testScoringURL)
+
+	const firstOperator, nextOperator = 520, 521
+	store.createAdminUser(t, firstOperator, "first")
+	store.createAdminUser(t, nextOperator, "next")
+	match := createCurrentPlannedGame(t, store, firstOperator)
+	firstAuth := signedScoringLaunch(testScoringToken, firstOperator, time.Now())
+	nextAuth := signedScoringLaunch(testScoringToken, nextOperator, time.Now())
+	auth := firstAuth
+
+	boundState := func(auth string, want int) scoringState {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/scoring/state?gameId=%d", match.ID), nil)
+		req.Header.Set("Authorization", "tma "+auth)
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code != want {
+			t.Fatalf("bound state response: %d %s", res.Code, res.Body.String())
+		}
+		var state scoringState
+		if want == http.StatusOK {
+			if err := json.Unmarshal(res.Body.Bytes(), &state); err != nil {
+				t.Fatal(err)
+			}
+		} else if want == http.StatusForbidden && !strings.Contains(res.Body.String(), "no longer control") {
+			t.Fatalf("expected inactive panel to explain takeover: %s", res.Body.String())
+		}
+		return state
+	}
+
+	command := func(state scoringState, action string) scoringCommand {
+		t.Helper()
+		if state.Transition.Action != action || state.Transition.Revision == "" || state.Transition.Label == "" {
+			t.Fatalf("expected %s to be available: %+v", action, state)
+		}
+		return scoringCommand{
+			GameID: state.GameID, SetID: state.SetID, Action: action,
+			RequestID: uuid.New(), Revision: state.Transition.Revision,
+		}
+	}
+
+	start := command(boundState(auth, http.StatusOK), startMatch)
+	state := scoringRequest(t, mux, auth, &start, http.StatusOK)
+	if state.SetID == 0 || state.SetNumber != 1 || state.Transition.Action != "" {
+		t.Fatalf("expected a playable first set: %+v", state)
+	}
+	if retry := scoringRequest(t, mux, auth, &start, http.StatusOK); retry != state {
+		t.Fatalf("retry changed first set: %+v", retry)
+	}
+	start.RequestID = uuid.New()
+	scoringRequest(t, mux, auth, &start, http.StatusConflict)
+
+	var oldIntermission scoringCommand
+	for number := 1; number <= 5; number++ {
+		set, err := store.games.GetActiveSet(match.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case number == 5:
+			set.HomeScore, set.GuestScore = 15, 13
+		case number%2 == 0:
+			set.HomeScore, set.GuestScore = 23, 25
+		default:
+			set.HomeScore, set.GuestScore = 25, 23
+		}
+		if err := store.games.SaveSet(set); err != nil {
+			t.Fatal(err)
+		}
+		if number == 2 {
+			r.handleGame(t.Context(), nil, makeGameMessageUpdate(nextOperator, nextOperator, "/game"))
+			current, err := store.games.GetGameByID(match.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.handleGameCallback(t.Context(), nil, makeGameCallbackUpdate(nextOperator, nextOperator,
+				current.ControlMessageID, "stale-set", finishSet+":1"))
+		}
+		endSet := command(boundState(auth, http.StatusOK), finishSet)
+		state = scoringRequest(t, mux, auth, &endSet, http.StatusOK)
+		if state.SetID != 0 || state.SetNumber != number || state.Phase != storage.GamePhaseBetweenSets {
+			t.Fatalf("set %d did not finish: %+v", number, state)
+		}
+		if retry := scoringRequest(t, mux, auth, &endSet, http.StatusOK); retry != state {
+			t.Fatalf("finish retry changed set %d: %+v", number, retry)
+		}
+		if number == 5 {
+			break
+		}
+
+		nextSet := command(state, startNextSet)
+		if number == 1 {
+			oldIntermission = nextSet
+			r.handleTakeover(t.Context(), nil, makeTextUpdate(nextOperator, nextOperator, "/takeover"))
+			boundState(firstAuth, http.StatusForbidden)
+			scoringRequest(t, mux, firstAuth, &nextSet, http.StatusForbidden)
+			scoringRequest(t, mux, firstAuth, &endSet, http.StatusForbidden)
+			auth = nextAuth
+			if after := boundState(auth, http.StatusOK); after != state {
+				t.Fatalf("takeover changed the match: before %+v, after %+v", state, after)
+			}
+		}
+		if number == 2 {
+			stale := oldIntermission
+			stale.RequestID = uuid.New()
+			scoringRequest(t, mux, auth, &stale, http.StatusConflict)
+		}
+		next := scoringRequest(t, mux, auth, &nextSet, http.StatusOK)
+		if next.SetID == 0 || next.SetNumber != number+1 || next.Home.Score != 0 || next.Guest.Score != 0 ||
+			next.HomeSide == state.HomeSide {
+			t.Fatalf("expected next set and switched sides: %+v", next)
+		}
+	}
+
+	finish := command(state, finishMatch)
+	final := scoringRequest(t, mux, auth, &finish, http.StatusOK)
+	if final.Phase != storage.GamePhaseFinished || final.Transition.Action != "" ||
+		final.Home.SetsWon != 3 || final.Guest.SetsWon != 2 {
+		t.Fatalf("unexpected final result: %+v", final)
+	}
+	scoringRequest(t, mux, auth, nil, http.StatusConflict)
+	if got := boundState(auth, http.StatusOK); got != final {
+		t.Fatalf("panel lost the final result: %+v", got)
+	}
+	if err := store.games.CreateGame(&storage.Game{
+		HomeTeamID: match.HomeTeamID, GuestTeamID: match.GuestTeamID, CurrentAdminUserID: firstOperator,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if retry := scoringRequest(t, mux, auth, &finish, http.StatusOK); retry != final {
+		t.Fatalf("finish retry picked up a new match: %+v", retry)
 	}
 }

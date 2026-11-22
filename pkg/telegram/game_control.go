@@ -10,7 +10,6 @@ import (
 	"github.com/go-telegram/bot/models"
 	game2 "github.com/smith3v/dash14/pkg/game"
 	"github.com/smith3v/dash14/pkg/storage"
-	"gorm.io/gorm"
 )
 
 // handleGame opens (or refreshes) the game-control thread for the current
@@ -99,7 +98,7 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	chatID := cb.Message.Message.Chat.ID
 	messageID := cb.Message.Message.ID
 	userID := cb.From.ID
-	data := cb.Data
+	data, targetSet := decodeLifecycleCallback(cb.Data)
 
 	_, _ = r.client.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: cb.ID,
@@ -129,7 +128,9 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 
-	broadcastText := ""
+	expected := lifecycleRevision(game, activeSet)
+	var committedGame *storage.Game
+	var committedSet *storage.GameSet
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
 		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
@@ -139,95 +140,30 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 			!isControlMessage(txGame, chatID, messageID) {
 			return errStaleGameControl
 		}
-		txActiveSet, err := findActiveSet(repo, game.ID)
+		txSet, err := findActiveSet(repo, game.ID)
 		if err != nil {
 			return err
 		}
-		phase := txGame.EffectivePhase(txActiveSet != nil && !txActiveSet.IsFinished)
+		if lifecycleRevision(txGame, txSet) != expected ||
+			(targetSet != 0 && txGame.CurrentSetNumber != targetSet) {
+			return errStaleGameControl
+		}
 
-		switch data {
-		case "game:start":
-			if phase != storage.GamePhasePlanned {
-				return nil
-			}
-			gState, setState, err := game2.StartPlannedGame(toGameState(txGame, phase))
-			if err != nil {
-				return err
-			}
-			applyGameState(txGame, gState)
-			if err := repo.SaveGame(txGame); err != nil {
-				return err
-			}
-			return repo.CreateSet(&storage.GameSet{
-				GameID:     txGame.ID,
-				SetNumber:  setState.SetNumber,
-				HomeScore:  setState.HomeScore,
-				GuestScore: setState.GuestScore,
-				IsFinished: false,
-			})
-
-		case "game:set:start_next":
-			if phase != storage.GamePhaseBetweenSets {
-				return nil
-			}
-			gState, setState, err := game2.StartNextSet(toGameState(txGame, phase))
-			if err != nil {
-				return err
-			}
-			applyGameState(txGame, gState)
-			if err := repo.SaveGame(txGame); err != nil {
-				return err
-			}
-			return repo.CreateSet(&storage.GameSet{
-				GameID:     txGame.ID,
-				SetNumber:  setState.SetNumber,
-				HomeScore:  setState.HomeScore,
-				GuestScore: setState.GuestScore,
-				IsFinished: false,
-			})
-
-		case scoreHomeUp, scoreHomeDown, scoreGuestUp, scoreGuestDown:
-			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
-				return nil
-			}
-			return saveScoringAction(repo, txGame, txActiveSet, data)
-
-		case "game:set:finish":
-			if phase != storage.GamePhaseSetInProgress || txActiveSet == nil {
-				return nil
-			}
-			setState := game2.SetState{
-				SetScore:   currentSetScore(txGame, txActiveSet),
-				IsFinished: txActiveSet.IsFinished,
-			}
-			res, err := game2.ConfirmSetFinished(toGameState(txGame, phase), setState)
-			if err != nil {
-				return err
-			}
-			txActiveSet.IsFinished = true
-			if err := repo.SaveSet(txActiveSet); err != nil {
-				return err
-			}
-			applyGameState(txGame, res.Game)
-			return repo.SaveGame(txGame)
-
-		case "game:finish":
-			if phase != storage.GamePhaseBetweenSets {
-				return nil
-			}
-			res, err := game2.ConfirmGameFinished(toGameState(txGame, phase))
-			if err != nil {
-				return err
-			}
-			applyGameState(txGame, res.Game)
-			return repo.SaveGame(txGame)
-
-		case switchSides:
-			return saveScoringAction(repo, txGame, txActiveSet, data)
-
+		switch {
+		case isLifecycleAction(data):
+			txSet, err = saveLifecycleAction(repo, txGame, txSet, data)
+		case data == switchSides || isScoringAction(data) &&
+			txGame.EffectivePhase(txSet != nil) == storage.GamePhaseSetInProgress:
+			err = saveScoringAction(repo, txGame, txSet, data)
 		default:
 			return errUnhandledGameCallback
 		}
+		if err != nil {
+			return err
+		}
+
+		committedGame, committedSet = txGame, txSet
+		return nil
 	})
 	if errors.Is(err, errUnhandledGameCallback) {
 		return
@@ -239,10 +175,10 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		})
 		return
 	}
-	if errors.Is(err, errSetAwaitingConfirmation) {
+	if errors.Is(err, errSetAwaitingConfirmation) || errors.Is(err, errLifecycleActionUnavailable) {
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
-			Text:   errSetAwaitingConfirmation.Error(),
+			Text:   "That action is unavailable. Check the score and current set.",
 		})
 		return
 	}
@@ -260,48 +196,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		r.gameChanged()
 	}
 
-	game, err = r.games.GetGameByID(game.ID)
-	if err != nil {
-		r.logger.ErrorContext(ctx, "handleGameCallback: reload game failed", "game_id", game.ID, "action", data, "err", err)
-		return
-	}
-	activeSet, err = r.games.GetActiveSet(game.ID)
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			r.logger.ErrorContext(ctx, "handleGameCallback: reload active set failed", "game_id", game.ID, "action", data, "err", err)
-			return
-		}
-		activeSet = nil
-	}
-	switch data {
-	case "game:start":
-		broadcastText = fmt.Sprintf("Game started: 🏠 %s vs ✈️ %s", home.Name, guest.Name)
-	case "game:set:start_next":
-		if activeSet != nil {
-			broadcastText = fmt.Sprintf(
-				"Set %d started\n🏠 %s vs ✈️ %s\n<i>Game score: %d-%d</i>",
-				activeSet.SetNumber,
-				home.Name,
-				guest.Name,
-				game.HomeSetsWon,
-				game.GuestSetsWon,
-			)
-		}
-	case scoreHomeUp, scoreHomeDown, scoreGuestUp, scoreGuestDown, switchSides:
-		broadcastText = scoringBroadcast(data, game, home, guest, activeSet)
-	case "game:finish":
-		broadcastText = fmt.Sprintf(
-			"Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
-			home.Name,
-			game.HomeSetsWon,
-			game.GuestSetsWon,
-			guest.Name,
-		)
-	}
-	r.editGameControl(ctx, game.ID, chatID, cb.Message.Message.Chat.Type == models.ChatTypePrivate)
+	broadcastText := gameActionBroadcast(data, committedGame, home, guest, committedSet)
+	r.editGameControl(ctx, committedGame.ID, chatID, cb.Message.Message.Chat.Type == models.ChatTypePrivate)
 
 	if strings.TrimSpace(broadcastText) != "" {
-		r.BroadcastExcept(ctx, broadcastText, game.CurrentAdminUserID)
+		r.BroadcastExcept(ctx, broadcastText, committedGame.CurrentAdminUserID)
 	}
 }
 
@@ -369,24 +268,9 @@ func buildGameControlMessage(game *storage.Game, homeName, guestName string, act
 		}
 		rows = append(rows, homeButtons, guestButtons)
 	}
-	if phase == storage.GamePhasePlanned {
+	if action := nextLifecycleAction(game, activeSet); action != "" {
 		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Start the game", CallbackData: "game:start"},
-		})
-	}
-	if phase == storage.GamePhaseSetInProgress && finishable {
-		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Finish the set", CallbackData: "game:set:finish"},
-		})
-	}
-	if phase == storage.GamePhaseBetweenSets && !game2.IsGameFinishEligible(toGameState(game, phase)) {
-		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Start next set", CallbackData: "game:set:start_next"},
-		})
-	}
-	if phase == storage.GamePhaseBetweenSets && game2.IsGameFinishEligible(toGameState(game, phase)) {
-		rows = append(rows, []models.InlineKeyboardButton{
-			{Text: "Finish the game", CallbackData: "game:finish"},
+			{Text: lifecycleActionLabel(action), CallbackData: fmt.Sprintf("%s:%d", action, game.CurrentSetNumber)},
 		})
 	}
 	if phase != storage.GamePhaseFinished {

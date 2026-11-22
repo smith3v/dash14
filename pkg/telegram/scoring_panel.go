@@ -5,14 +5,15 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/smith3v/dash14/pkg/game"
 	"github.com/smith3v/dash14/pkg/storage"
 	"gorm.io/gorm"
 )
@@ -27,20 +28,28 @@ var scoringPanelCSS []byte
 var scoringPanelJS []byte
 
 var (
-	errScoringOwner = errors.New("Only the current match operator can use the scoring panel.")
-	errScoringSet   = errors.New("That set is no longer active. Check the current score before tapping again.")
-	errScoringKey   = errors.New("That request ID was already used for another action.")
+	errScoringControlLost = errors.New("You no longer control this match. Run /game in the bot to see who has control.")
+	errScoringOwner       = errors.New("Only the current match operator can use the scoring panel.")
+	errScoringSet         = errors.New("That set is no longer active. Check the current score before tapping again.")
+	errScoringKey         = errors.New("That request ID was already used for another action.")
 )
 
 type scoringPanel struct {
 	router      *Router
 	token       string
-	controlEdit chan struct{}
+	controlEdit chan uint
 }
 
 type scoringTeam struct {
-	Name  string `json:"name"`
-	Score int    `json:"score"`
+	Name    string `json:"name"`
+	Score   int    `json:"score"`
+	SetsWon int    `json:"setsWon"`
+}
+
+type scoringTransition struct {
+	Action   string `json:"action"`
+	Label    string `json:"label"`
+	Revision string `json:"revision"`
 }
 
 type scoringState struct {
@@ -48,6 +57,7 @@ type scoringState struct {
 	SetID         uint              `json:"setId"`
 	SetNumber     int               `json:"setNumber"`
 	SetFinishable bool              `json:"setFinishable"`
+	Transition    scoringTransition `json:"transition,omitzero"`
 	Phase         storage.GamePhase `json:"phase"`
 	HomeSide      string            `json:"homeSide"`
 	Home          scoringTeam       `json:"home"`
@@ -59,13 +69,14 @@ type scoringCommand struct {
 	SetID     uint      `json:"setId"`
 	RequestID uuid.UUID `json:"requestId"`
 	Action    string    `json:"action"`
+	Revision  string    `json:"revision,omitempty"`
 }
 
 // RegisterScoringPanel adds the Mini App and its API to the existing server.
 // The returned worker refreshes the Telegram controls after Mini App writes.
 func (r *Router) RegisterScoringPanel(mux *http.ServeMux, token, panelURL string) func(context.Context) {
 	r.scoringPanelURL = panelURL
-	panel := &scoringPanel{router: r, token: token, controlEdit: make(chan struct{}, 1)}
+	panel := &scoringPanel{router: r, token: token, controlEdit: make(chan uint, 32)}
 	mux.HandleFunc("GET /scoring", scoringAsset("text/html; charset=utf-8", scoringPanelHTML))
 	mux.HandleFunc("GET /scoring/panel.css", scoringAsset("text/css; charset=utf-8", scoringPanelCSS))
 	mux.HandleFunc("GET /scoring/panel.js", scoringAsset("text/javascript; charset=utf-8", scoringPanelJS))
@@ -112,7 +123,16 @@ func (p *scoringPanel) serveState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p.respond(w, r, userID, nil)
+	var gameID uint
+	if raw := r.URL.Query().Get("gameId"); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, strconv.IntSize)
+		if err != nil || id == 0 {
+			scoringJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid match ID."})
+			return
+		}
+		gameID = uint(id)
+	}
+	p.respond(w, r, userID, gameID, nil)
 }
 
 func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
@@ -129,19 +149,35 @@ func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	var cmd scoringCommand
 	if err := decoder.Decode(&cmd); err != nil || decoder.Decode(new(any)) != io.EOF ||
-		cmd.GameID == 0 || cmd.SetID == 0 || cmd.RequestID == uuid.Nil || !isScoringAction(cmd.Action) {
+		cmd.GameID == 0 || cmd.RequestID == uuid.Nil || !cmd.validAction() {
 		scoringJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid scoring action."})
 		return
 	}
-	p.respond(w, r, userID, &cmd)
+	p.respond(w, r, userID, cmd.GameID, &cmd)
 }
 
-func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID int64, cmd *scoringCommand) {
+func (cmd scoringCommand) validAction() bool {
+	if isLifecycleAction(cmd.Action) {
+		return cmd.Revision != ""
+	}
+	return isScoringAction(cmd.Action) && cmd.SetID != 0 && cmd.Revision == ""
+}
+
+func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID int64, gameID uint, cmd *scoringCommand) {
 	var state scoringState
 	var broadcast string
 	changed := false
 	err := p.router.games.WithinTx(func(repo *storage.GameRepository) error {
-		match, err := repo.GetCurrentGame()
+		var match *storage.Game
+		var err error
+		if gameID == 0 {
+			match, err = repo.GetCurrentGame()
+		} else {
+			match, err = repo.GetGameByID(gameID)
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errNoCurrentGame
+		}
 		if err != nil {
 			return err
 		}
@@ -149,48 +185,29 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 			return errNoCurrentGame
 		}
 		if match.CurrentAdminUserID != userID {
+			if gameID != 0 {
+				return errScoringControlLost
+			}
 			return errScoringOwner
 		}
 		set, err := findActiveSet(repo, match.ID)
 		if err != nil {
 			return err
 		}
-		phase := match.EffectivePhase(set != nil)
-		if cmd != nil && (match.ID != cmd.GameID || set == nil || set.ID != cmd.SetID ||
-			phase != storage.GamePhaseSetInProgress) {
-			return errScoringSet
-		}
 		home, guest, err := repo.GetGameTeams(match)
 		if err != nil {
 			return err
 		}
 		if cmd != nil {
-			previous, err := repo.RecordScoringRequest(set.ID, cmd.RequestID.String(), cmd.Action)
+			set, changed, err = cmd.apply(repo, match, set)
 			if err != nil {
 				return err
 			}
-			switch previous {
-			case "":
-				if err := saveScoringAction(repo, match, set, cmd.Action); err != nil {
-					return err
-				}
-				changed = true
-				broadcast = scoringBroadcast(cmd.Action, match, home, guest, set)
-			case cmd.Action:
-				// An earlier attempt committed. Return the current score.
-			default:
-				return errScoringKey
+			if changed {
+				broadcast = gameActionBroadcast(cmd.Action, match, home, guest, set)
 			}
 		}
-		state = scoringState{
-			GameID: match.ID, SetNumber: match.CurrentSetNumber, Phase: phase, HomeSide: match.HomeTeamSide,
-			Home: scoringTeam{Name: home.Name}, Guest: scoringTeam{Name: guest.Name},
-		}
-		if phase == storage.GamePhaseSetInProgress {
-			state.SetID, state.SetNumber = set.ID, set.SetNumber
-			state.Home.Score, state.Guest.Score = set.HomeScore, set.GuestScore
-			state.SetFinishable = game.IsSetFinishable(currentSetScore(match, set))
-		}
+		state = panelGameState(match, set, home, guest)
 		return nil
 	})
 	if err != nil {
@@ -202,13 +219,69 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if p.router.gameChanged != nil {
 			p.router.gameChanged()
 		}
-		p.router.BroadcastExcept(r.Context(), broadcast, userID)
+		if broadcast != "" {
+			p.router.BroadcastExcept(r.Context(), broadcast, userID)
+		}
 		select {
-		case p.controlEdit <- struct{}{}:
+		case p.controlEdit <- state.GameID:
 		default:
 		}
 	}
 	scoringJSON(w, http.StatusOK, state)
+}
+
+func (cmd scoringCommand) apply(repo *storage.GameRepository, match *storage.Game, set *storage.GameSet) (*storage.GameSet, bool, error) {
+	lifecycle := isLifecycleAction(cmd.Action)
+	receiptSetID, receiptValue := cmd.SetID, cmd.Action
+	if lifecycle {
+		// A lifecycle retry can arrive after its set has ended. Scope these
+		// receipts to the request UUID and bind them to the displayed state.
+		receiptSetID = 0
+		receiptValue = fmt.Sprintf("%d/%d/%s/%s", cmd.GameID, cmd.SetID, cmd.Action, cmd.Revision)
+	} else if match.EffectivePhase(set != nil) != storage.GamePhaseSetInProgress ||
+		activeSetID(set) != cmd.SetID {
+		return nil, false, errScoringSet
+	}
+	previous, err := repo.RecordScoringRequest(receiptSetID, cmd.RequestID.String(), receiptValue)
+	if err != nil {
+		return nil, false, err
+	}
+	if previous == receiptValue {
+		return set, false, nil
+	}
+	if previous != "" {
+		return nil, false, errScoringKey
+	}
+
+	if lifecycle {
+		if cmd.SetID != activeSetID(set) || cmd.Revision != lifecycleRevision(match, set) {
+			return nil, false, errLifecycleActionUnavailable
+		}
+		set, err = saveLifecycleAction(repo, match, set, cmd.Action)
+	} else {
+		err = saveScoringAction(repo, match, set, cmd.Action)
+	}
+	return set, err == nil, err
+}
+
+func panelGameState(match *storage.Game, set *storage.GameSet, home, guest *storage.Team) scoringState {
+	phase := match.EffectivePhase(set != nil && !set.IsFinished)
+	state := scoringState{
+		GameID: match.ID, SetNumber: match.CurrentSetNumber, Phase: phase, HomeSide: match.HomeTeamSide,
+		Home:  scoringTeam{Name: home.Name, SetsWon: match.HomeSetsWon},
+		Guest: scoringTeam{Name: guest.Name, SetsWon: match.GuestSetsWon},
+	}
+	if phase == storage.GamePhaseSetInProgress {
+		state.SetID, state.SetNumber = set.ID, set.SetNumber
+		state.Home.Score, state.Guest.Score = set.HomeScore, set.GuestScore
+	}
+	if action := nextLifecycleAction(match, set); action != "" {
+		state.SetFinishable = action == finishSet
+		state.Transition = scoringTransition{
+			Action: action, Label: lifecycleActionLabel(action), Revision: lifecycleRevision(match, set),
+		}
+	}
+	return state
 }
 
 func (p *scoringPanel) writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -217,6 +290,10 @@ func (p *scoringPanel) writeError(w http.ResponseWriter, r *http.Request, err er
 	switch {
 	case errors.Is(err, errScoringOwner):
 		status, message = http.StatusForbidden, errScoringOwner.Error()
+	case errors.Is(err, errScoringControlLost):
+		status, message = http.StatusForbidden, errScoringControlLost.Error()
+	case errors.Is(err, errLifecycleActionUnavailable):
+		message = errLifecycleActionUnavailable.Error()
 	case errors.Is(err, errScoringSet):
 		message = errScoringSet.Error()
 	case errors.Is(err, errSetAwaitingConfirmation):
@@ -245,13 +322,8 @@ func (p *scoringPanel) runControlEdits(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-p.controlEdit:
-			match, err := p.router.games.GetCurrentGame()
-			if err != nil {
-				p.router.logger.ErrorContext(ctx, "load current game for scoring panel control edit", "err", err)
-			} else if match != nil {
-				p.router.editGameControl(ctx, match.ID, 0, false)
-			}
+		case gameID := <-p.controlEdit:
+			p.router.editGameControl(ctx, gameID, 0, false)
 		}
 	}
 }

@@ -64,7 +64,8 @@ func keyboardCallbackData(t *testing.T, markup any) []string {
 	var data []string
 	for _, row := range kb.InlineKeyboard {
 		for _, btn := range row {
-			data = append(data, btn.CallbackData)
+			action, _ := decodeLifecycleCallback(btn.CallbackData)
+			data = append(data, action)
 		}
 	}
 	return data

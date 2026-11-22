@@ -7,9 +7,11 @@ const teams = document.querySelector("#teams");
 const options = document.querySelector("#options");
 const switchSides = document.querySelector("#switch-sides");
 const status = document.querySelector("#status");
+const transition = document.querySelector("#transition");
 const retry = document.querySelector("#retry");
 const template = document.querySelector("#team-control");
 
+let gameId = new URLSearchParams(window.location.search).get("gameId");
 let state;
 let pending;
 let submitting = false;
@@ -27,6 +29,7 @@ function teamControl(role) {
   subtract.addEventListener("click", () => act("game:" + role + ":-1"));
   return {
     card, add, subtract,
+    increment: card.querySelector(".increment"),
     name: card.querySelector(".name"),
     score: card.querySelector(".score"),
   };
@@ -41,49 +44,64 @@ function setStatus(message, error = false) {
   status.parentElement.classList.toggle("error", error);
 }
 
-function editable() {
-  return connected && state?.setId > 0 && !pending && !submitting;
+function canSubmit() {
+  return connected && state && !pending && !submitting;
 }
 
 function updateButtons() {
-  const enabled = editable();
+  const enabled = canSubmit();
+  const scoring = enabled && state.setId > 0;
   for (const [control, team] of [[home, state?.home], [guest, state?.guest]]) {
-    control.add.disabled = !enabled || state.setFinishable;
-    control.subtract.disabled = !enabled || team.score === 0;
+    control.add.disabled = !scoring || state.setFinishable;
+    control.subtract.disabled = !scoring || team.score === 0;
+    if (state?.setId) control.increment.hidden = !connected || state.setFinishable;
+    control.subtract.hidden = !connected || !state?.setId;
   }
-  switchSides.disabled = !enabled;
-  if (!enabled) options.open = false;
+  switchSides.disabled = !scoring;
+  options.hidden = !connected || !state?.setId;
+  if (!scoring) options.open = false;
+  transition.hidden = !enabled || !state.transition;
+  transition.textContent = state?.transition?.label || "";
   retry.hidden = !pending || submitting;
 }
 
 function render(nextState) {
   state = nextState;
+  gameId = state.gameId;
   connected = true;
   const active = state.setId > 0;
-  setLabel.textContent = state.phase === "planned" ? "Before the match" : "Set " + state.setNumber;
+  const headings = {planned: "Before the match", between_sets: "Between sets", finished: "Match finished"};
+  setLabel.textContent = headings[state.phase] || "Set " + state.setNumber;
   for (const [control, team] of [[home, state.home], [guest, state.guest]]) {
     control.name.textContent = team.name;
-    control.score.textContent = active ? team.score : "–";
-    control.add.querySelector(".increment").hidden = state.setFinishable;
-    const label = team.name + ", " + team.score + " points";
-    control.add.setAttribute("aria-label", state.setFinishable ? label : label + ". Add one point");
+    control.score.textContent = active ? team.score : team.setsWon;
+    control.increment.textContent = active ? "+1" : "Sets won";
+    control.increment.hidden = active && state.setFinishable;
+    const label = active ? team.name + ", " + team.score + " points" : team.name + ", sets won: " + team.setsWon;
+    control.add.setAttribute("aria-label", active && !state.setFinishable ? label + ". Add one point" : label);
     control.subtract.setAttribute("aria-label", "Remove one point from " + team.name);
   }
   const left = state.homeSide === "right" ? guest.card : home.card;
   if (teams.firstElementChild !== left) teams.prepend(left);
   teams.hidden = false;
-  options.hidden = !active;
   updateButtons();
 }
 
 function showScoreStatus(message = "") {
-  if (!state.setId) {
-    setStatus("Use /game for set and match controls.");
+  if (state.phase === "between_sets") {
+    setStatus("Set " + state.setNumber + " finished.");
   } else if (state.setFinishable) {
-    setStatus("Set ready to finish. Confirm in /game or correct the score here.");
+    setStatus("Set ready to finish.");
   } else {
     setStatus(message);
   }
+}
+
+function rejectState(result) {
+  connected = false;
+  if ([401, 403, 409].includes(result.status)) pending = undefined;
+  updateButtons();
+  setStatus(result.body.error, true);
 }
 
 async function request(path, cmd) {
@@ -106,22 +124,21 @@ async function request(path, cmd) {
 }
 
 async function refresh() {
-  if (refreshing || pending || document.hidden) return;
+  if (refreshing || submitting || document.hidden) return;
   refreshing = true;
   const version = refreshVersion;
   try {
-    const result = await request("/scoring/state");
+    const path = gameId ? "/scoring/state?gameId=" + encodeURIComponent(gameId) : "/scoring/state";
+    const result = await request(path);
     if (version !== refreshVersion) return;
     if (result.status === 200) {
-      const changed = !connected || state?.setId !== result.body.setId ||
+      const changed = !connected || state?.phase !== result.body.phase || state?.setId !== result.body.setId ||
         state?.setFinishable !== result.body.setFinishable;
       render(result.body);
-      if (changed && (!actionRejected || !state.setId || state.setFinishable)) showScoreStatus();
+      if (!pending && changed && !actionRejected) showScoreStatus();
     } else {
-      connected = false;
       actionRejected = false;
-      updateButtons();
-      setStatus(result.body.error, true);
+      rejectState(result);
     }
   } catch {
     if (version === refreshVersion) {
@@ -144,7 +161,8 @@ async function submit() {
   try {
     const result = await request("/scoring/actions", pending);
     if (result.status === 200) {
-      const message = pending.action === "game:reverse" ? "Sides switched." : "Score saved.";
+      const message = pending.revision ? "" :
+        (pending.action === "game:reverse" ? "Sides switched." : "Score saved.");
       pending = undefined;
       render(result.body);
       showScoreStatus(message);
@@ -152,9 +170,8 @@ async function submit() {
       setStatus("Could not confirm the update. Retry this action.", true);
     } else {
       pending = undefined;
-      connected = false;
-      actionRejected = true;
-      setStatus(result.body.error, true);
+      actionRejected = result.status === 409;
+      rejectState(result);
     }
   } catch {
     setStatus("Could not confirm the update. Retry this action.", true);
@@ -164,13 +181,16 @@ async function submit() {
   }
 }
 
-function act(action) {
-  if (!editable()) return;
+function act(action, revision) {
+  if (!canSubmit() || (!revision && !state.setId)) return;
   actionRejected = false;
-  pending = {action, gameId: state.gameId, setId: state.setId, requestId: crypto.randomUUID()};
+  pending = {action, revision, gameId: state.gameId, setId: state.setId, requestId: crypto.randomUUID()};
   void submit();
 }
 
+transition.addEventListener("click", () => {
+  if (state?.transition) act(state.transition.action, state.transition.revision);
+});
 switchSides.addEventListener("click", () => act("game:reverse"));
 retry.addEventListener("click", submit);
 

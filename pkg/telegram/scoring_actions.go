@@ -15,7 +15,7 @@ const (
 	switchSides    = "game:reverse"
 )
 
-var errSetAwaitingConfirmation = errors.New("The set is ready to finish. Use /game to confirm the result or correct the score.")
+var errSetAwaitingConfirmation = errors.New("The set is ready to finish. Confirm the result or correct the score.")
 
 func isScoringAction(action string) bool {
 	switch action {

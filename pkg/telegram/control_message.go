@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -33,7 +34,7 @@ func (r *Router) gameControlView(match *storage.Game, home, guest *storage.Team,
 	view := buildGameControlMessage(match, home.Name, guest.Name, set)
 	if private && r.scoringPanelURL != "" && match.Status != storage.GameStatusFinished {
 		view.Keyboard.InlineKeyboard = append([][]models.InlineKeyboardButton{
-			{{Text: "Open scoring panel", WebApp: &models.WebAppInfo{URL: r.scoringPanelURL}}},
+			{{Text: "Open scoring panel", WebApp: &models.WebAppInfo{URL: fmt.Sprintf("%s?gameId=%d", r.scoringPanelURL, match.ID)}}},
 		}, view.Keyboard.InlineKeyboard...)
 	}
 	return view

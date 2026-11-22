@@ -52,12 +52,22 @@ button:focus-visible, summary:focus-visible {
 
 button:disabled { cursor: default; }
 details { position: relative; z-index: 1; }
-summary, #switch-sides, #retry {
+summary, #switch-sides, #transition, #retry {
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #4d586c;
   border-radius: 10px;
   background: #212a39;
+}
+
+#transition, #retry {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+
+#transition {
+  background: #244777;
+  border-color: #6d92c4;
 }
 
 #switch-sides {
