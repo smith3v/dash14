@@ -196,6 +196,53 @@ func TestMigrateRemovesLegacyLifecycleState(t *testing.T) {
 	}
 
 	if err := repo.CreateGame(&storage.Game{HomeTeamID: homeID, GuestTeamID: guestID}); err == nil {
-		t.Fatal("migration removed the single non-finished game constraint")
+		t.Fatal("migration removed the single current game constraint")
+	}
+}
+
+func TestMigrateReplacesLegacySingleGameIndex(t *testing.T) {
+	db := openTestDB(t)
+	homeID, guestID := seedTeams(t, db)
+	repo := storage.NewGameRepository(db)
+	match := &storage.Game{HomeTeamID: homeID, GuestTeamID: guestID, Status: storage.GameStatusInProgress, ControlMessageID: 42}
+	if err := repo.CreateGame(match); err != nil {
+		t.Fatalf("seed game to migrate: %v", err)
+	}
+	for _, query := range []string{
+		`ALTER TABLE games DROP COLUMN control_chat_id`,
+		`DROP INDEX idx_games_single_current`,
+		`CREATE UNIQUE INDEX idx_games_single_non_finished ON games ((1)) WHERE status <> 'finished'`,
+	} {
+		if err := db.Exec(query).Error; err != nil {
+			t.Fatalf("restore legacy game index: %v", err)
+		}
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("replace legacy index: %v", err)
+	}
+
+	current, err := repo.GetCurrentGame()
+	if err != nil || current == nil || current.ID != match.ID ||
+		current.ControlMessageID != 42 || current.ControlChatID != 0 {
+		t.Fatalf("current game after migration = %+v, %v", current, err)
+	}
+	match.Status = storage.GameStatusCanceled
+	if err := repo.SaveGame(match); err != nil {
+		t.Fatalf("cancel game after migration: %v", err)
+	}
+	if current, err := repo.GetCurrentGame(); err != nil || current != nil {
+		t.Fatalf("current game after cancellation = %+v, %v", current, err)
+	}
+	next := &storage.Game{HomeTeamID: homeID, GuestTeamID: guestID}
+	if err := repo.CreateGame(next); err != nil {
+		t.Fatalf("create game alongside canceled game: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("rerun migration with canceled and current games: %v", err)
+	}
+	if err := repo.CreateGame(&storage.Game{
+		HomeTeamID: homeID, GuestTeamID: guestID, Status: storage.GameStatusInProgress,
+	}); err == nil {
+		t.Fatal("SQLite accepted a second current game")
 	}
 }

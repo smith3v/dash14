@@ -215,11 +215,11 @@ func TestRouterNewRouter(t *testing.T) {
 	}
 }
 
-// TestRouterCommandsAreRouted verifies that each of the five commands results
+// TestRouterCommandsAreRouted verifies that each registered command results
 // in a reply being sent back. We use ProcessUpdate to drive the registered
 // handlers and a stub HTTP client so no real network calls are made.
 func TestRouterCommandsAreRouted(t *testing.T) {
-	commands := []string{"/start", "/stop", "/plan", "/game", "/takeover"}
+	commands := []string{"/start", "/stop", "/plan", "/game", "/takeover", "/reset"}
 
 	for _, cmd := range commands {
 		cmd := cmd // capture
@@ -237,16 +237,18 @@ func TestRouterCommandsAreRouted(t *testing.T) {
 			}
 
 			users := openTestUsers(t)
-			r := NewRouter(b, discardLogger(), &FakeBot{}, users, nil)
+			fb := &FakeBot{}
+			r := NewRouter(b, discardLogger(), fb, users, nil)
 			r.Register()
 
-			ctx := context.Background()
-			upd := makeTextUpdate(100, 200, cmd)
-
-			// ProcessUpdate dispatches the update to the matching handler.
-			// The handler calls b.SendMessage which goes through stubHTTPClient.
-			b.ProcessUpdate(ctx, upd)
-			// If we reach here without panic the handler was invoked.
+			b.ProcessUpdate(context.Background(), makeTextUpdate(100, 200, cmd))
+			messages := fb.SentMessages()
+			if len(messages) != 1 {
+				t.Fatalf("%s produced %d replies, want 1", cmd, len(messages))
+			}
+			if cmd == "/reset" && messages[0].Text != "You are not authorised to use this command." {
+				t.Fatalf("/reset returned unexpected reply: %q", messages[0].Text)
+			}
 		})
 	}
 }

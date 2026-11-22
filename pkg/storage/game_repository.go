@@ -13,6 +13,12 @@ import (
 // longer matches the persisted game.
 var ErrPlannedGameChanged = errors.New("storage: planned game changed")
 
+// Keep current-game queries and SQLite's partial unique index in sync.
+const (
+	currentGamePredicate   = "status IN ('" + string(GameStatusPlanned) + "', '" + string(GameStatusInProgress) + "')"
+	singleCurrentGameIndex = "idx_games_single_current"
+)
+
 // GameRepository provides persistence operations for Game and GameSet records.
 type GameRepository struct {
 	db *gorm.DB
@@ -101,12 +107,12 @@ func (r *GameRepository) CreateSet(set *GameSet) error {
 	return nil
 }
 
-// GetCurrentGame returns the single non-finished game. It returns nil, nil
-// when no planned/in-progress game exists.
+// GetCurrentGame returns the single planned or in-progress game. It returns
+// nil, nil when no such game exists.
 func (r *GameRepository) GetCurrentGame() (*Game, error) {
 	var game Game
 	err := r.db.
-		Where("status <> ?", GameStatusFinished).
+		Where(currentGamePredicate).
 		Order("id DESC").
 		First(&game).Error
 	if err != nil {
@@ -182,8 +188,9 @@ func (r *GameRepository) SaveSet(set *GameSet) error {
 // game and owner still match. A score saved during /game is left intact.
 func (r *GameRepository) SetGameControl(expected *Game, adminID, chatID int64, messageID int) error {
 	result := r.db.Model(&Game{}).
-		Where("id = ? AND status <> ? AND current_admin_user_id = ? AND home_team_id = ? AND guest_team_id = ?",
-			expected.ID, GameStatusFinished, expected.CurrentAdminUserID, expected.HomeTeamID, expected.GuestTeamID).
+		Where(currentGamePredicate).
+		Where("id = ? AND current_admin_user_id = ? AND home_team_id = ? AND guest_team_id = ?",
+			expected.ID, expected.CurrentAdminUserID, expected.HomeTeamID, expected.GuestTeamID).
 		Updates(map[string]any{
 			"current_admin_user_id": adminID,
 			"control_message_id":    messageID,

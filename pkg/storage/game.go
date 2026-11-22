@@ -12,6 +12,8 @@ const (
 	GameStatusInProgress GameStatus = "in_progress"
 	// GameStatusFinished indicates the game has concluded.
 	GameStatusFinished GameStatus = "finished"
+	// GameStatusCanceled indicates the operator abandoned the game.
+	GameStatusCanceled GameStatus = "canceled"
 )
 
 // GamePhase represents the operator-visible phase of a match.
@@ -29,6 +31,8 @@ const (
 	GamePhaseBetweenSets GamePhase = "between_sets"
 	// GamePhaseFinished indicates the game has concluded.
 	GamePhaseFinished GamePhase = "finished"
+	// GamePhaseCanceled indicates the operator abandoned the game.
+	GamePhaseCanceled GamePhase = "canceled"
 )
 
 // DeriveGamePhase maps the coarse persisted game status plus active-set
@@ -39,6 +43,8 @@ func DeriveGamePhase(status GameStatus, hasActiveSet bool) GamePhase {
 		return GamePhasePlanned
 	case GameStatusFinished:
 		return GamePhaseFinished
+	case GameStatusCanceled:
+		return GamePhaseCanceled
 	default:
 		if hasActiveSet {
 			return GamePhaseSetInProgress

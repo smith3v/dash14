@@ -10,7 +10,7 @@ It stores match state in SQLite, serves OBS-ready overlays over HTTP, and expose
 - OBS overlay rendering for planned, live, between-set intermission, and finished states
 - Separate intermission scoreboard page with per-set history for compatibility OBS setups
 - Telegram subscriber flow (`/start`, `/stop`)
-- Admin-only game planning and control (`/plan`, `/game`, `/takeover`)
+- Admin-only game planning and control (`/plan`, `/game`, `/takeover`, `/reset`)
 - Read-only broadcast updates to subscribed users for game start, score changes, next-set start, and match finish
 - Persistent state in SQLite
 
@@ -193,6 +193,9 @@ What it does:
   - renders planned overlay and intermission page
 - `/game` opens/refreshes control message for current admin
 - `/takeover` transfers admin ownership of current game
+- `/reset` cancels the game you control, including during or between sets.
+  Run `/plan` to schedule the next game. The overlay returns to the most
+  recent completed result or goes transparent when there is no completed game.
 
 ### Control message actions
 
@@ -263,7 +266,7 @@ gofmt -w ./...
   - verify `telegram.token`
   - check network connectivity and logs.
 - `/plan` rejected with existing game message:
-  - only one non-finished game is allowed at a time.
+  - only one planned or in-progress game is allowed at a time.
 - Overlay URL unreachable
   - check the app log for the bound address or a port conflict.
   - use port `8081` for a default native run and `8080` for Docker on the same host.

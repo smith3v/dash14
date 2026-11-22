@@ -135,11 +135,11 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	var committedGame *storage.Game
 	var committedSets []storage.GameSet
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
-		txGame, err := repo.GetGameByID(game.ID)
+		txGame, err := repo.GetCurrentGame()
 		if err != nil {
 			return err
 		}
-		if txGame.Status == storage.GameStatusFinished || txGame.CurrentAdminUserID != userID ||
+		if txGame == nil || txGame.ID != game.ID || txGame.CurrentAdminUserID != userID ||
 			!isControlMessage(txGame, chatID, messageID) {
 			return errStaleGameControl
 		}

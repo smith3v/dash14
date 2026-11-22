@@ -66,7 +66,7 @@ func NewWeb(renderer *Renderer) *Web {
 }
 
 func (web *Web) Publish(match *Match) error {
-	if match == nil {
+	if match == nil || match.Game.Status == storage.GameStatusCanceled {
 		main := revision("idle", updater)
 		side := revision("idle-intermission", updater)
 		return web.store(webSnapshot{

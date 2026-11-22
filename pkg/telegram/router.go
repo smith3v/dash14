@@ -78,6 +78,7 @@ func (r *Router) Register() {
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/stop", bot.MatchTypeExact, r.handleStop)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/plan", bot.MatchTypeExact, r.handlePlan)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/game", bot.MatchTypeExact, r.handleGame)
+	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/reset", bot.MatchTypeExact, r.handleReset)
 	r.b.RegisterHandler(bot.HandlerTypeMessageText, "/takeover", bot.MatchTypeExact, r.handleTakeover)
 	// Non-command text is routed to the plan wizard when the user has an
 	// active plan state; otherwise it is silently ignored.

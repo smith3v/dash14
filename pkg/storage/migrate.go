@@ -14,12 +14,13 @@ func Migrate(db *gorm.DB) error {
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`
-			CREATE UNIQUE INDEX IF NOT EXISTS idx_games_single_non_finished
-			ON games ((1))
-			WHERE status <> 'finished'
-		`).Error; err != nil {
-			return fmt.Errorf("storage: create single non-finished game index: %w", err)
+		indexSQL := "CREATE UNIQUE INDEX IF NOT EXISTS " + singleCurrentGameIndex +
+			" ON games ((1)) WHERE " + currentGamePredicate
+		if err := tx.Exec(indexSQL).Error; err != nil {
+			return fmt.Errorf("storage: create single current game index: %w", err)
+		}
+		if err := tx.Exec("DROP INDEX IF EXISTS idx_games_single_non_finished").Error; err != nil {
+			return fmt.Errorf("storage: drop obsolete game index: %w", err)
 		}
 
 		var phaseColumns int

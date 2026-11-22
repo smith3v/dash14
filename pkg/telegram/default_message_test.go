@@ -67,6 +67,9 @@ func TestUnknownCommandAdminGetsAdminHelpWithPlannedGame(t *testing.T) {
 	if !strings.Contains(last.Text, "/game to manage the game status and the score") {
 		t.Fatalf("expected /game help entry, got %q", last.Text)
 	}
+	if !strings.Contains(last.Text, "/reset to cancel the game you control") {
+		t.Fatalf("expected /reset help entry, got %q", last.Text)
+	}
 	if !strings.Contains(last.Text, "/takeover to takeover the current game") {
 		t.Fatalf("expected /takeover help entry, got %q", last.Text)
 	}

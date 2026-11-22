@@ -651,7 +651,7 @@ func TestRunWithDepsRuntimeRestoresPlannedGameAfterMigration(t *testing.T) {
 	}
 }
 
-func TestRunWithDepsRuntimeRestoresFinishedGameWithoutCurrentMatch(t *testing.T) {
+func TestRunWithDepsRuntimeRestoresFinishedGameAfterCancellation(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "dash14.db")
 	outputPath := filepath.Join(dir, "overlay", "current.html")
@@ -719,6 +719,18 @@ func TestRunWithDepsRuntimeRestoresFinishedGameWithoutCurrentMatch(t *testing.T)
 		IsFinished: true,
 	}); err != nil {
 		t.Fatalf("create finished set 2: %v", err)
+	}
+	canceled := &storage.Game{
+		HomeTeamID: guest.ID, GuestTeamID: home.ID, Status: storage.GameStatusCanceled,
+		HomeSetsWon: 1, GuestSetsWon: 1, CurrentSetNumber: 3,
+	}
+	if err := games.CreateGame(canceled); err != nil {
+		t.Fatalf("create newer canceled game: %v", err)
+	}
+	if err := games.CreateSet(&storage.GameSet{
+		GameID: canceled.ID, SetNumber: 3, HomeScore: 15, GuestScore: 11,
+	}); err != nil {
+		t.Fatalf("create canceled game's unfinished set: %v", err)
 	}
 
 	cfg := config.Config{

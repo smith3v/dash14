@@ -108,7 +108,7 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text: fmt.Sprintf(
-				"A game is currently in progress: %s vs %s.\nFinish this game before planning another one.",
+				"A game is currently in progress: %s vs %s.\nFinish this game or use /reset before planning another one.",
 				home.Name,
 				guest.Name,
 			),
@@ -596,6 +596,6 @@ func isSingleActiveGameConstraintError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "idx_games_single_non_finished") ||
+	return strings.Contains(msg, "idx_games_single_current") ||
 		strings.Contains(msg, "UNIQUE constraint failed")
 }

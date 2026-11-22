@@ -72,6 +72,7 @@ func (r *Router) buildDefaultHelpMessage(userID int64) (string, error) {
 		"Use the following commands:",
 		"/plan to plan the next game",
 		"/game to manage the game status and the score",
+		"/reset to cancel the game you control",
 		"/takeover to takeover the current game (then use /game)",
 	)
 	return strings.Join(lines, "\n"), nil

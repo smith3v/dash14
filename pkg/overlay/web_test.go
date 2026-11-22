@@ -119,6 +119,14 @@ func TestWebPublishesMatchingPagesAndGameState(t *testing.T) {
 	if updated.MainRevision == finished.MainRevision || updated.IntermissionRevision != finished.IntermissionRevision {
 		t.Fatal("template edit should affect only the main page")
 	}
+
+	match.Game.Status = storage.GameStatusCanceled
+	match.Sets[0].IsFinished = false
+	canceled := publish()
+	if canceled.Game != nil || canceled.MainRevision != idle.MainRevision ||
+		canceled.IntermissionRevision != idle.IntermissionRevision {
+		t.Fatalf("canceled match should publish the empty overlay: %+v", canceled)
+	}
 }
 
 func TestWebPublishesOverlayLayouts(t *testing.T) {

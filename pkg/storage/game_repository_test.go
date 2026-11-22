@@ -465,7 +465,7 @@ func TestGetCurrentGame(t *testing.T) {
 	}
 }
 
-func TestCreateGameRejectsSecondNonFinishedGame(t *testing.T) {
+func TestCreateGameRejectsSecondCurrentGame(t *testing.T) {
 	db := openTestDB(t)
 	homeID, guestID := seedTeams(t, db)
 	repo := storage.NewGameRepository(db)
@@ -497,12 +497,12 @@ func TestCreateGameRejectsSecondNonFinishedGame(t *testing.T) {
 
 	var count int64
 	if err := db.Model(&storage.Game{}).
-		Where("status <> ?", storage.GameStatusFinished).
+		Where("status IN ?", []storage.GameStatus{storage.GameStatusPlanned, storage.GameStatusInProgress}).
 		Count(&count).Error; err != nil {
-		t.Fatalf("count non-finished games: %v", err)
+		t.Fatalf("count current games: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("non-finished game count = %d, want 1", count)
+		t.Fatalf("current game count = %d, want 1", count)
 	}
 }
 
@@ -574,6 +574,12 @@ func TestGameEffectivePhaseAlwaysDerivesFromStatusAndActiveSet(t *testing.T) {
 				Status: storage.GameStatusFinished,
 			},
 			want: storage.GamePhaseFinished,
+		},
+		{
+			name:         "canceled game with an unfinished set derives to canceled",
+			game:         storage.Game{Status: storage.GameStatusCanceled},
+			hasActiveSet: true,
+			want:         storage.GamePhaseCanceled,
 		},
 	}
 
