@@ -551,15 +551,16 @@ func TestGameControlScoreboardEditsSameMessageForPointsAndCorrections(t *testing
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-start3", "game:start"))
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, 2)
 	scoreboard := fb.SentMessages()[1]
+	const matchup = "🏠 A&amp;B &lt;Home&gt; vs ✈️ Control Guest"
 	if scoreboard.ChatID != subID || scoreboard.ParseMode != models.ParseModeHTML ||
-		!strings.Contains(scoreboard.Text, "A&amp;B &lt;Home&gt; <b>0-0</b>") {
+		scoreboard.Text != matchup+"\n<b>Set 1 · 0–0</b>\n<i>Sets won: 0–0</i>" {
 		t.Fatalf("unexpected initial scoreboard: %+v", scoreboard)
 	}
 
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score", "game:home:+1"))
-	waitForScoreboardEdit(t, fb, scoreboard, "A&amp;B &lt;Home&gt; <b>1-0</b>")
+	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 1–0</b>")
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-score-correction", "game:home:-1"))
-	waitForScoreboardEdit(t, fb, scoreboard, "<b>0-0</b>")
+	waitForScoreboardEdit(t, fb, scoreboard, matchup+"\n<b>Set 1 · 0–0</b>")
 
 	for _, edit := range fb.EditedMessages() {
 		if edit.ChatID == adminID {
@@ -614,8 +615,7 @@ func TestGameControlSetFinishEditsScoreboard(t *testing.T) {
 
 	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-set-finish", "game:set:finish"))
-	waitForScoreboardEdit(t, fb, scoreboard, "<b>25-10</b>")
-	waitForScoreboardEdit(t, fb, scoreboard, "Set 3 finished | Game score: 3-0")
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 3 finished · 25–10</b>\n<i>Sets won: 3–0</i>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
@@ -679,7 +679,7 @@ func TestGameControlStartNextSetCreatesActiveSetAndEditsScoreboard(t *testing.T)
 		t.Fatalf("unexpected active set after start next set: %+v", active)
 	}
 	waitForCondition(t, "live overlay render after next set start", func() bool { return renderer.liveCount() > 0 })
-	waitForScoreboardEdit(t, fb, scoreboard, "Current set: 4 | Game score: 2-1")
+	waitForScoreboardEdit(t, fb, scoreboard, "<b>Set 4 · 0–0</b>\n<i>Sets won: 2–1</i>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}
@@ -800,7 +800,7 @@ func TestGameControlGameFinishEditsScoreboard(t *testing.T) {
 
 	scoreboard := fb.SentMessages()[1]
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, ctrlID, "cb-game-finish-summary", "game:finish"))
-	waitForScoreboardEdit(t, fb, scoreboard, "Game finished\n🏠 Control Home <b>4-0</b>")
+	waitForScoreboardEdit(t, fb, scoreboard, "🏠 Control Home vs ✈️ Control Guest\n<b>Final · 4–0</b>")
 	if got := len(fb.SentMessages()); got != 2 {
 		t.Fatalf("sent %d messages, want one control and one scoreboard", got)
 	}

@@ -322,13 +322,13 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	if finishedSet != nil {
 		activeSet = finishedSet
 	}
+	matchup := fmt.Sprintf("🏠 %s vs ✈️ %s", homeName, guestName)
 	var text string
 	switch {
 	case game.Status == storage.GameStatusFinished:
-		text = fmt.Sprintf("Game finished\n🏠 %s <b>%d-%d</b> ✈️ %s",
-			homeName, game.HomeSetsWon, game.GuestSetsWon, guestName)
+		text = fmt.Sprintf("%s\n<b>Final · %d–%d</b>", matchup, game.HomeSetsWon, game.GuestSetsWon)
 	case activeSet != nil && game.Status == storage.GameStatusInProgress:
-		text = formatBroadcastScore(game, homeName, guestName, activeSet)
+		text = formatBroadcastScore(game, matchup, activeSet)
 	default:
 		return
 	}
@@ -491,18 +491,17 @@ func applyGameState(dst *storage.Game, src game2.GameState) {
 	dst.SideSwitchedInSet5 = src.SideSwitchedInSet5
 }
 
-func formatBroadcastScore(game *storage.Game, homeName, guestName string, set *storage.GameSet) string {
-	setLabel := fmt.Sprintf("Current set: %d", set.SetNumber)
+func formatBroadcastScore(game *storage.Game, matchup string, set *storage.GameSet) string {
+	setLabel := fmt.Sprintf("Set %d", set.SetNumber)
 	if set.IsFinished {
-		setLabel = fmt.Sprintf("Set %d finished", set.SetNumber)
+		setLabel += " finished"
 	}
 	return fmt.Sprintf(
-		"🏠 %s <b>%d-%d</b> ✈️ %s\n<i>%s | Game score: %d-%d</i>",
-		homeName,
+		"%s\n<b>%s · %d–%d</b>\n<i>Sets won: %d–%d</i>",
+		matchup,
+		setLabel,
 		set.HomeScore,
 		set.GuestScore,
-		guestName,
-		setLabel,
 		game.HomeSetsWon,
 		game.GuestSetsWon,
 	)
