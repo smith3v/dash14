@@ -124,6 +124,20 @@ func (r *GameRepository) GetCurrentGame() (*Game, error) {
 	return &game, nil
 }
 
+// LatestCanceledGameID returns the newest canceled match ID, or zero if
+// there has been no cancellation.
+func (r *GameRepository) LatestCanceledGameID() (uint, error) {
+	var id uint
+	err := r.db.Model(&Game{}).
+		Where("status = ?", GameStatusCanceled).
+		Select("COALESCE(MAX(id), 0)").
+		Row().Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("storage: get latest canceled game ID: %w", err)
+	}
+	return id, nil
+}
+
 // GetGameByID returns the game with the given ID. It returns a wrapped
 // gorm.ErrRecordNotFound when no game exists with that ID.
 func (r *GameRepository) GetGameByID(id uint) (*Game, error) {

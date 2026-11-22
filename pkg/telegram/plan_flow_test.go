@@ -43,9 +43,12 @@ func (g *txFailGames) WithinTxContext(ctx context.Context, fn func(repo *storage
 	})
 }
 
-func (g *txFailGames) CreateGame(game *storage.Game) error        { return g.inner.CreateGame(game) }
-func (g *txFailGames) CreateSet(set *storage.GameSet) error       { return g.inner.CreateSet(set) }
-func (g *txFailGames) GetCurrentGame() (*storage.Game, error)     { return g.inner.GetCurrentGame() }
+func (g *txFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
+func (g *txFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
+func (g *txFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
+func (g *txFailGames) LatestCanceledGameID() (uint, error) {
+	return g.inner.LatestCanceledGameID()
+}
 func (g *txFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
 func (g *txFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)
@@ -240,12 +243,7 @@ func makePlainTextUpdate(userID int64, chatID int64, text string) *models.Update
 	}
 }
 
-// makeCallbackUpdate builds a minimal *models.Update that looks like an inline
-// keyboard callback sent by a user.
-func makeCallbackUpdate(userID int64, chatID int64, callbackID, data string) *models.Update {
-	return makeCallbackUpdateForMessage(userID, chatID, 99, callbackID, data)
-}
-
+// makeCallbackUpdateForMessage builds an inline keyboard callback.
 func makeCallbackUpdateForMessage(userID int64, chatID int64, messageID int, callbackID, data string) *models.Update {
 	return &models.Update{
 		ID: 1,
@@ -418,7 +416,7 @@ func TestPlan2To8Matches(t *testing.T) {
 
 	// Simulate the admin clicking the first button.
 	firstTeamID := inserted[0].ID
-	cbUpd := makeCallbackUpdate(userID, chatID, "cbq1",
+	cbUpd := makeCallbackUpdateForMessage(userID, chatID, last.MessageID, "cbq1",
 		fmt.Sprintf("plan:home:%d", firstTeamID))
 	r.handlePlanCallback(ctx, nil, cbUpd)
 
@@ -999,7 +997,7 @@ func TestPlanReplacementRejectsConcurrentReplacement(t *testing.T) {
 
 func TestPlanReplacementCallbackCannotApplyTwice(t *testing.T) {
 	store := openPlanTestStore(t)
-	r, _, renderer := newPlanRouter(t, store)
+	r, fb, renderer := newPlanRouter(t, store)
 
 	const userID int64 = 7114
 	const chatID int64 = 8114
@@ -1010,7 +1008,12 @@ func TestPlanReplacementCallbackCannotApplyTwice(t *testing.T) {
 
 	confirmPlannedGameReplacement(t, r, userID, chatID)
 	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, newHome.Name))
-	guestCallback := makeCallbackUpdate(userID, chatID, "guest-repeat", fmt.Sprintf("plan:guest:%d", newGuest.ID))
+	insertTeam(t, store.teams, "repeated-other-guest", "Repeated Other Guest", "ROG")
+	r.handlePlanText(context.Background(), nil, makePlainTextUpdate(userID, chatID, "Guest"))
+	messages := fb.SentMessages()
+	last := messages[len(messages)-1]
+	guestCallback := makeCallbackUpdateForMessage(userID, chatID, last.MessageID, "guest-repeat",
+		fmt.Sprintf("plan:guest:%d", newGuest.ID))
 	r.handlePlanCallback(context.Background(), nil, guestCallback)
 	r.handlePlanCallback(context.Background(), nil, guestCallback)
 

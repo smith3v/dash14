@@ -17,6 +17,7 @@ type GameStore interface {
 	CreateGame(game *storage.Game) error
 	CreateSet(set *storage.GameSet) error
 	GetCurrentGame() (*storage.Game, error)
+	LatestCanceledGameID() (uint, error)
 	GetGameByID(id uint) (*storage.Game, error)
 	GetActiveSet(gameID uint) (*storage.GameSet, error)
 	ListSetsByGameID(gameID uint) ([]storage.GameSet, error)

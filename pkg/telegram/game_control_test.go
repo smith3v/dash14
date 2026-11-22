@@ -916,9 +916,12 @@ func (g *saveFailGames) WithinTxContext(ctx context.Context, fn func(repo *stora
 	}
 	return g.inner.WithinTxContext(ctx, fn)
 }
-func (g *saveFailGames) CreateGame(game *storage.Game) error        { return g.inner.CreateGame(game) }
-func (g *saveFailGames) CreateSet(set *storage.GameSet) error       { return g.inner.CreateSet(set) }
-func (g *saveFailGames) GetCurrentGame() (*storage.Game, error)     { return g.inner.GetCurrentGame() }
+func (g *saveFailGames) CreateGame(game *storage.Game) error    { return g.inner.CreateGame(game) }
+func (g *saveFailGames) CreateSet(set *storage.GameSet) error   { return g.inner.CreateSet(set) }
+func (g *saveFailGames) GetCurrentGame() (*storage.Game, error) { return g.inner.GetCurrentGame() }
+func (g *saveFailGames) LatestCanceledGameID() (uint, error) {
+	return g.inner.LatestCanceledGameID()
+}
 func (g *saveFailGames) GetGameByID(id uint) (*storage.Game, error) { return g.inner.GetGameByID(id) }
 func (g *saveFailGames) GetActiveSet(gameID uint) (*storage.GameSet, error) {
 	return g.inner.GetActiveSet(gameID)

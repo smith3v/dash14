@@ -17,8 +17,12 @@ import (
 type planState struct {
 	// HomeTeam is set once the admin has selected (or auto-selected) the home
 	// team. While it is nil the wizard is waiting for a home-team search query.
-	HomeTeam    *storage.Team
-	Replacement *plannedGameReplacement
+	HomeTeam             *storage.Team
+	Replacement          *plannedGameReplacement
+	SelectionChatID      int64
+	SelectionMessageID   int
+	LatestCanceledGameID uint
+	Saving               bool
 }
 
 type plannedGameReplacement struct {
@@ -36,6 +40,8 @@ type plannedGameReplacement struct {
 // repository. We ask for one more than the display cap (8) so we can
 // distinguish between "exactly 8" and ">8" with a single query.
 const planSearchLimit = 9
+
+var errPlanPredatesCancellation = errors.New("telegram: plan started before game cancellation")
 
 // handlePlan handles the /plan command.
 // Only admins are permitted. On success it initialises a fresh plan state for
@@ -78,7 +84,17 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 	if current == nil {
-		r.startPlanTeamSelection(ctx, userID, chatID, &planState{})
+		canceledID, err := r.games.LatestCanceledGameID()
+		if err != nil {
+			r.logger.ErrorContext(ctx, "handlePlan: get latest canceled game failed", "user_id", userID, "err", err)
+			_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: chatID,
+				Text:   "Something went wrong. Please try again.",
+			})
+			return
+		}
+		r.plans.Store(userID, &planState{LatestCanceledGameID: canceledID})
+		r.promptPlanHomeTeam(ctx, chatID)
 		return
 	}
 
@@ -154,8 +170,7 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 	}
 }
 
-func (r *Router) startPlanTeamSelection(ctx context.Context, userID, chatID int64, state *planState) {
-	r.plans.Store(userID, state)
+func (r *Router) promptPlanHomeTeam(ctx context.Context, chatID int64) {
 	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID: chatID,
 		Text:   "Please enter the home team name:",
@@ -196,7 +211,7 @@ func (r *Router) handlePlanText(ctx context.Context, _ *bot.Bot, update *models.
 		return
 	}
 	state := raw.(*planState)
-	if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
+	if state.Saving || (state.Replacement != nil && state.Replacement.AwaitingConfirmation) {
 		return
 	}
 
@@ -249,31 +264,10 @@ func (r *Router) searchAndSelectHomeTeam(
 		})
 
 	case len(teams) == 1:
-		// Auto-select the single result.
-		selected := &teams[0]
-		state.HomeTeam = selected
-		r.plans.Store(userID, state)
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   fmt.Sprintf("Home team: %s\nPlease enter the guest team name:", selected.Name),
-		})
+		r.selectPlanHomeTeam(ctx, userID, chatID, state, &teams[0])
 
 	case len(teams) <= 8:
-		// Show an inline keyboard with one button per team.
-		buttons := make([][]models.InlineKeyboardButton, 0, len(teams))
-		for _, team := range teams {
-			btn := models.InlineKeyboardButton{
-				Text:         team.Name,
-				CallbackData: fmt.Sprintf("plan:home:%d", team.ID),
-			}
-			buttons = append(buttons, []models.InlineKeyboardButton{btn})
-		}
-		keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:      chatID,
-			Text:        "Select the home team:",
-			ReplyMarkup: keyboard,
-		})
+		r.sendPlanTeamChoices(ctx, userID, chatID, state, "home", teams)
 
 	default:
 		// More than 8 results — ask the admin to narrow the search.
@@ -284,16 +278,52 @@ func (r *Router) searchAndSelectHomeTeam(
 	}
 }
 
-// handlePlanCallback handles inline keyboard callbacks whose data starts with
-// "plan:". Currently only "plan:home:<teamID>" is handled; guest callbacks
-// will be added in Task 17.
+func (r *Router) sendPlanTeamChoices(ctx context.Context, userID, chatID int64, state *planState, step string, teams []storage.Team) {
+	buttons := make([][]models.InlineKeyboardButton, 0, len(teams))
+	for _, team := range teams {
+		buttons = append(buttons, []models.InlineKeyboardButton{{
+			Text:         team.Name,
+			CallbackData: fmt.Sprintf("plan:%s:%d", step, team.ID),
+		}})
+	}
+	msg, err := r.client.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:      chatID,
+		Text:        fmt.Sprintf("Select the %s team:", step),
+		ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: buttons},
+	})
+	if err != nil || msg == nil {
+		r.logger.WarnContext(ctx, "send plan team choices failed", "user_id", userID, "step", step, "err", err)
+		return
+	}
+	next := *state
+	next.SelectionChatID = chatID
+	next.SelectionMessageID = msg.ID
+	r.plans.CompareAndSwap(userID, state, &next)
+}
+
+func (r *Router) selectPlanHomeTeam(ctx context.Context, userID, chatID int64, state *planState, team *storage.Team) {
+	next := *state
+	next.HomeTeam = team
+	next.SelectionChatID = 0
+	next.SelectionMessageID = 0
+	if !r.plans.CompareAndSwap(userID, state, &next) {
+		return
+	}
+	_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: chatID,
+		Text:   fmt.Sprintf("Home team: %s\nPlease enter the guest team name:", team.Name),
+	})
+}
+
+// handlePlanCallback handles team selections and replacement confirmations.
 func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil || update.CallbackQuery.From.ID == 0 || update.CallbackQuery.Message.Message == nil {
 		return
 	}
 
 	userID := update.CallbackQuery.From.ID
-	chatID := update.CallbackQuery.Message.Message.Chat.ID
+	message := update.CallbackQuery.Message.Message
+	chatID := message.Chat.ID
 	data := update.CallbackQuery.Data
 
 	// Acknowledge the callback query so Telegram removes the loading indicator.
@@ -306,27 +336,34 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 	state := raw.(*planState)
+	if state.Saving {
+		return
+	}
 
 	switch {
 	case data == "plan:replace:keep":
-		if !matchesReplacementConfirmation(state.Replacement, chatID, update.CallbackQuery.Message.Message.ID) {
+		if !matchesReplacementConfirmation(state.Replacement, chatID, message.ID) {
 			return
 		}
-		r.plans.Delete(userID)
+		if !r.plans.CompareAndDelete(userID, state) {
+			return
+		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "The current planned game was kept.",
 		})
 
 	case data == "plan:replace:start":
-		if !matchesReplacementConfirmation(state.Replacement, chatID, update.CallbackQuery.Message.Message.ID) {
+		if !matchesReplacementConfirmation(state.Replacement, chatID, message.ID) {
 			return
 		}
 		current, err := r.games.GetCurrentGame()
 		if err != nil {
 			r.logger.ErrorContext(ctx, "handlePlanCallback: get current replacement game failed",
 				"user_id", userID, "game_id", state.Replacement.GameID, "err", err)
-			r.plans.Delete(userID)
+			if !r.plans.CompareAndDelete(userID, state) {
+				return
+			}
 			_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: chatID,
 				Text:   "Something went wrong. Please run /plan again.",
@@ -334,18 +371,25 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 			return
 		}
 		if !matchesPlannedGameReplacement(current, state.Replacement) {
-			r.plans.Delete(userID)
+			if !r.plans.CompareAndDelete(userID, state) {
+				return
+			}
 			_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: chatID,
 				Text:   "The planned game changed and cannot be replaced. Please run /plan again.",
 			})
 			return
 		}
-		state.Replacement.AwaitingConfirmation = false
-		r.startPlanTeamSelection(ctx, userID, chatID, state)
+		next := *state
+		replacement := *state.Replacement
+		replacement.AwaitingConfirmation = false
+		next.Replacement = &replacement
+		if r.plans.CompareAndSwap(userID, state, &next) {
+			r.promptPlanHomeTeam(ctx, chatID)
+		}
 
 	case strings.HasPrefix(data, "plan:home:"):
-		if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
+		if state.HomeTeam != nil || !state.matchesTeamSelection(chatID, message.ID) {
 			return
 		}
 		idStr := strings.TrimPrefix(data, "plan:home:")
@@ -367,16 +411,10 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 			return
 		}
 
-		state.HomeTeam = team
-		r.plans.Store(userID, state)
-
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   fmt.Sprintf("Home team: %s\nPlease enter the guest team name:", team.Name),
-		})
+		r.selectPlanHomeTeam(ctx, userID, chatID, state, team)
 
 	case strings.HasPrefix(data, "plan:guest:"):
-		if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
+		if state.HomeTeam == nil || !state.matchesTeamSelection(chatID, message.ID) {
 			return
 		}
 		idStr := strings.TrimPrefix(data, "plan:guest:")
@@ -398,6 +436,10 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		}
 		r.finalizePlannedGame(ctx, userID, chatID, state, team)
 	}
+}
+
+func (s *planState) matchesTeamSelection(chatID int64, messageID int) bool {
+	return s.SelectionMessageID != 0 && s.SelectionMessageID == messageID && s.SelectionChatID == chatID
 }
 
 func matchesReplacementConfirmation(replacement *plannedGameReplacement, chatID int64, messageID int) bool {
@@ -456,20 +498,7 @@ func (r *Router) searchAndSelectGuestTeam(
 		r.finalizePlannedGame(ctx, userID, chatID, state, selected)
 
 	case len(teams) <= 8:
-		buttons := make([][]models.InlineKeyboardButton, 0, len(teams))
-		for _, team := range teams {
-			btn := models.InlineKeyboardButton{
-				Text:         team.Name,
-				CallbackData: fmt.Sprintf("plan:guest:%d", team.ID),
-			}
-			buttons = append(buttons, []models.InlineKeyboardButton{btn})
-		}
-		keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: buttons}
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID:      chatID,
-			Text:        "Select the guest team:",
-			ReplyMarkup: keyboard,
-		})
+		r.sendPlanTeamChoices(ctx, userID, chatID, state, "guest", teams)
 
 	default:
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
@@ -518,6 +547,12 @@ func (r *Router) finalizePlannedGame(
 		game.ID = state.Replacement.GameID
 	}
 
+	saving := *state
+	saving.Saving = true
+	if !r.plans.CompareAndSwap(userID, state, &saving) {
+		return
+	}
+
 	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
 		if isReplacement {
 			return repo.ReplacePlannedGame(
@@ -529,16 +564,30 @@ func (r *Router) finalizePlannedGame(
 				userID,
 			)
 		}
+		canceledID, err := repo.LatestCanceledGameID()
+		if err != nil {
+			return err
+		}
+		if canceledID != state.LatestCanceledGameID {
+			return errPlanPredatesCancellation
+		}
 		return repo.CreateGame(game)
 	}); err != nil {
 		r.logger.ErrorContext(ctx, "finalizePlannedGame: transactional write failed",
 			"user_id", userID, "game_id", game.ID, "is_replacement", isReplacement, "err", err)
 		text := "Planning failed. Match state was not changed. Please try again."
-		if isReplacement && errors.Is(err, storage.ErrPlannedGameChanged) {
-			r.plans.Delete(userID)
+		switch {
+		case errors.Is(err, storage.ErrPlannedGameChanged):
+			r.plans.CompareAndDelete(userID, &saving)
 			text = "The planned game changed and was not replaced. Please run /plan again."
-		} else if !isReplacement && isSingleActiveGameConstraintError(err) {
-			text = "Cannot run /plan: another game is still planned or in progress."
+		case errors.Is(err, errPlanPredatesCancellation):
+			r.plans.CompareAndDelete(userID, &saving)
+			text = "A game was canceled while you were planning. Please run /plan again."
+		default:
+			r.plans.CompareAndSwap(userID, &saving, state)
+			if !isReplacement && isSingleActiveGameConstraintError(err) {
+				text = "Cannot run /plan: another game is still planned or in progress."
+			}
 		}
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
@@ -547,9 +596,7 @@ func (r *Router) finalizePlannedGame(
 		return
 	}
 
-	// Consume the completed wizard before external side effects so repeated
-	// callbacks cannot apply or render the same replacement twice.
-	r.plans.Delete(userID)
+	r.plans.CompareAndDelete(userID, &saving)
 	if r.gameChanged != nil {
 		r.gameChanged()
 	}

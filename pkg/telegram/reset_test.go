@@ -148,10 +148,13 @@ func TestResetWithoutCurrentGamePreservesFinishedResult(t *testing.T) {
 
 func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 	ctx := context.Background()
-	const adminID, oldChatID, nextChatID int64 = 30, 40, 41
+	const adminID, subscriberID, oldChatID, nextChatID int64 = 30, 31, 40, 41
 	store := openPlanTestStore(t)
 	r, fb, _ := newPlanRouter(t, store)
 	store.createAdminUser(t, adminID, "owner")
+	if err := store.users.UpsertTelegramUser(subscriberID, "subscriber", "Subscriber"); err != nil {
+		t.Fatal(err)
+	}
 	first := createCurrentPlannedGame(t, store, adminID)
 	r.handleGame(ctx, nil, makeTextUpdate(adminID, oldChatID, "/game"))
 	oldMessageID := fb.SentMessages()[0].MessageID
@@ -171,7 +174,9 @@ func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 		next.ControlChatID != nextChatID || next.ControlMessageID != oldMessageID {
 		t.Fatalf("new game after old callback = %+v, %v", next, err)
 	}
+	beforeBroadcast := len(fb.SentMessages())
 	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, nextChatID, oldMessageID, "new", "game:start"))
+	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, beforeBroadcast+1)
 	next, err = store.games.GetCurrentGame()
 	if err != nil || next == nil || next.Status != storage.GameStatusInProgress {
 		t.Fatalf("fresh control did not start new game: %+v, %v", next, err)
@@ -221,5 +226,106 @@ func TestResetRevokesInFlightGameControls(t *testing.T) {
 				t.Fatalf("in-flight action changed canceled game: %+v, %v", got, err)
 			}
 		})
+	}
+}
+
+func TestResetRejectsOldPlanTeamSelection(t *testing.T) {
+	ctx := context.Background()
+	const adminID, chatID int64 = 30, 40
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	store.createAdminUser(t, adminID, "owner")
+	match := createCurrentPlannedGame(t, store, adminID)
+	insertTeam(t, store.teams, "other-guest", "Other Guest", "OG")
+
+	chooseGuest := func() sentMessage {
+		t.Helper()
+		r.handlePlanText(ctx, nil, makePlainTextUpdate(adminID, chatID, "Control Home"))
+		r.handlePlanText(ctx, nil, makePlainTextUpdate(adminID, chatID, "Guest"))
+		messages := fb.SentMessages()
+		return messages[len(messages)-1]
+	}
+	confirmPlannedGameReplacement(t, r, adminID, chatID)
+	oldKeyboard := chooseGuest()
+	oldChoices := keyboardCallbackData(t, oldKeyboard.ReplyMarkup)
+	r.handleReset(ctx, nil, makeTextUpdate(adminID, chatID, "/reset"))
+
+	r.handlePlan(ctx, nil, makeTextUpdate(adminID, chatID, "/plan"))
+	newKeyboard := chooseGuest()
+	newChoices := keyboardCallbackData(t, newKeyboard.ReplyMarkup)
+	r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(adminID, chatID, oldKeyboard.MessageID, "old", oldChoices[0]))
+	if current, err := store.games.GetCurrentGame(); err != nil || current != nil {
+		t.Fatalf("stale team choice created a match: %+v, %v", current, err)
+	}
+
+	r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(adminID, chatID, newKeyboard.MessageID, "new", newChoices[0]))
+	next, err := store.games.GetCurrentGame()
+	if err != nil || next == nil || next.ID == match.ID || next.Status != storage.GameStatusPlanned {
+		t.Fatalf("fresh team choice did not create the next planned match: %+v, %v", next, err)
+	}
+}
+
+func TestResetDoesNotLetDuplicatePlanCallbackCreateAnotherGame(t *testing.T) {
+	ctx := context.Background()
+	const adminID, chatID int64 = 30, 40
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	store.createAdminUser(t, adminID, "owner")
+	insertTeam(t, store.teams, "home", "Home Club", "HC")
+	insertTeam(t, store.teams, "guest-one", "Guest One", "G1")
+	insertTeam(t, store.teams, "guest-two", "Guest Two", "G2")
+
+	r.handlePlan(ctx, nil, makeTextUpdate(adminID, chatID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(adminID, chatID, "Home Club"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(adminID, chatID, "Guest"))
+	messages := fb.SentMessages()
+	prompt := messages[len(messages)-1]
+	choice := keyboardCallbackData(t, prompt.ReplyMarkup)[0]
+	r.games = &beforeGameTransaction{GameRepository: store.games, hook: func() {
+		r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(adminID, chatID, prompt.MessageID, "retry", choice))
+		r.handleReset(ctx, nil, makeTextUpdate(adminID, chatID, "/reset"))
+	}}
+	r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(adminID, chatID, prompt.MessageID, "first", choice))
+
+	current, err := store.games.GetCurrentGame()
+	if err != nil || current == nil || current.Status != storage.GameStatusPlanned {
+		t.Fatalf("the first callback should create the planned game: %+v, %v", current, err)
+	}
+	var count int64
+	if err := store.db.Model(&storage.Game{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("duplicate callback and reset produced %d games: %v", count, err)
+	}
+}
+
+func TestResetInvalidatesAnotherOperatorsUnfinishedPlan(t *testing.T) {
+	ctx := context.Background()
+	const ownerID, plannerID int64 = 30, 31
+	store := openPlanTestStore(t)
+	r, fb, _ := newPlanRouter(t, store)
+	store.createAdminUser(t, ownerID, "owner")
+	store.createAdminUser(t, plannerID, "planner")
+	insertTeam(t, store.teams, "home", "Home Club", "HC")
+	insertTeam(t, store.teams, "guest-one", "Guest One", "G1")
+	insertTeam(t, store.teams, "guest-two", "Guest Two", "G2")
+
+	r.handlePlan(ctx, nil, makeTextUpdate(plannerID, plannerID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(plannerID, plannerID, "Home Club"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(plannerID, plannerID, "Guest"))
+	messages := fb.SentMessages()
+	prompt := messages[len(messages)-1]
+	choice := keyboardCallbackData(t, prompt.ReplyMarkup)[0]
+
+	r.handlePlan(ctx, nil, makeTextUpdate(ownerID, ownerID, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(ownerID, ownerID, "Home Club"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(ownerID, ownerID, "Guest One"))
+	r.handleReset(ctx, nil, makeTextUpdate(ownerID, ownerID, "/reset"))
+	r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(plannerID, plannerID, prompt.MessageID, "old", choice))
+
+	if current, err := store.games.GetCurrentGame(); err != nil || current != nil {
+		t.Fatalf("an older wizard created a match after another operator reset: %+v, %v", current, err)
+	}
+	messages = fb.SentMessages()
+	if got := messages[len(messages)-1].Text; !strings.Contains(got, "Please run /plan again") {
+		t.Fatalf("expected restart guidance for the old wizard, got %q", got)
 	}
 }
