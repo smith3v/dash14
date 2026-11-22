@@ -190,6 +190,9 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if match == nil {
 			return errNoCurrentGame
 		}
+		if match.Status == storage.GameStatusCanceled {
+			return errScoringControlLost
+		}
 		if match.CurrentAdminUserID != userID {
 			if gameID != 0 {
 				return errScoringControlLost

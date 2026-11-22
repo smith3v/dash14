@@ -35,8 +35,11 @@ func (r *Router) resetGame(ctx context.Context, userID int64) string {
 		return failed
 	}
 
+	r.gameActionMu.Lock()
+	defer r.gameActionMu.Unlock()
+
 	var game *storage.Game
-	err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+	err := r.games.WithinTxContext(ctx, func(repo *storage.GameRepository) error {
 		current, err := repo.GetCurrentGame()
 		if err != nil || current == nil {
 			return err

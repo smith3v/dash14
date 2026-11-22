@@ -158,6 +158,7 @@ func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 	first := createCurrentPlannedGame(t, store, adminID)
 	r.handleGame(ctx, nil, makeTextUpdate(adminID, oldChatID, "/game"))
 	oldMessageID := fb.SentMessages()[0].MessageID
+	oldCallback := makeCurrentGameCallbackUpdate(t, store.games, adminID, oldChatID, oldMessageID, "old", startMatch)
 	r.handleReset(ctx, nil, makeTextUpdate(adminID, oldChatID, "/reset"))
 
 	r.handlePlan(ctx, nil, makeTextUpdate(adminID, nextChatID, "/plan"))
@@ -167,7 +168,7 @@ func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 	// exactly the same message ID as the old one.
 	fb.nextMessageID = oldMessageID
 	r.handleGame(ctx, nil, makeTextUpdate(adminID, nextChatID, "/game"))
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, oldChatID, oldMessageID, "old", "game:start"))
+	r.handleGameCallback(ctx, nil, oldCallback)
 
 	next, err := store.games.GetCurrentGame()
 	if err != nil || next == nil || next.ID == first.ID || next.Status != storage.GameStatusPlanned ||
@@ -175,7 +176,8 @@ func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 		t.Fatalf("new game after old callback = %+v, %v", next, err)
 	}
 	beforeBroadcast := len(fb.SentMessages())
-	r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, nextChatID, oldMessageID, "new", "game:start"))
+	freshCallback := makeCurrentGameCallbackUpdate(t, store.games, adminID, nextChatID, oldMessageID, "new", startMatch)
+	r.handleGameCallback(ctx, nil, freshCallback)
 	waitForSentCount(t, func() int { return len(fb.SentMessages()) }, beforeBroadcast+1)
 	next, err = store.games.GetCurrentGame()
 	if err != nil || next == nil || next.Status != storage.GameStatusInProgress {
@@ -183,17 +185,27 @@ func TestResetMakesOldControlStaleAcrossChats(t *testing.T) {
 	}
 }
 
-type beforeGameTransaction struct {
+type gameStoreHooks struct {
 	*storage.GameRepository
-	hook func()
+	beforeTransaction    func()
+	afterCurrentGameRead func()
 }
 
-func (s *beforeGameTransaction) WithinTx(fn func(*storage.GameRepository) error) error {
-	if hook := s.hook; hook != nil {
-		s.hook = nil
+func (s *gameStoreHooks) WithinTx(fn func(*storage.GameRepository) error) error {
+	if hook := s.beforeTransaction; hook != nil {
+		s.beforeTransaction = nil
 		hook()
 	}
 	return s.GameRepository.WithinTx(fn)
+}
+
+func (s *gameStoreHooks) GetCurrentGame() (*storage.Game, error) {
+	match, err := s.GameRepository.GetCurrentGame()
+	if hook := s.afterCurrentGameRead; hook != nil {
+		s.afterCurrentGameRead = nil
+		hook()
+	}
+	return match, err
 }
 
 func TestResetRevokesInFlightGameControls(t *testing.T) {
@@ -208,16 +220,20 @@ func TestResetRevokesInFlightGameControls(t *testing.T) {
 			r.handleGame(ctx, nil, makeTextUpdate(adminID, chatID, "/game"))
 			messageID := fb.SentMessages()[0].MessageID
 
-			r.games = &beforeGameTransaction{GameRepository: store.games, hook: func() {
-				r.handleReset(ctx, nil, makeTextUpdate(adminID, chatID, "/reset"))
-			}}
+			games := &gameStoreHooks{GameRepository: store.games}
+			r.games = games
+			cancel := func() { r.handleReset(ctx, nil, makeTextUpdate(adminID, chatID, "/reset")) }
 			switch action {
 			case "/game":
+				games.beforeTransaction = cancel
 				r.handleGame(ctx, nil, makeTextUpdate(adminID, chatID, action))
 			case "/takeover":
+				games.beforeTransaction = cancel
 				r.handleTakeover(ctx, nil, makeTextUpdate(adminID, chatID, action))
 			default:
-				r.handleGameCallback(ctx, nil, makeGameCallbackUpdate(adminID, chatID, messageID, "old", action))
+				callback := makeCurrentGameCallbackUpdate(t, store.games, adminID, chatID, messageID, "old", action)
+				games.afterCurrentGameRead = cancel
+				r.handleGameCallback(ctx, nil, callback)
 			}
 
 			got, err := store.games.GetGameByID(match.ID)
@@ -281,7 +297,7 @@ func TestResetDoesNotLetDuplicatePlanCallbackCreateAnotherGame(t *testing.T) {
 	messages := fb.SentMessages()
 	prompt := messages[len(messages)-1]
 	choice := keyboardCallbackData(t, prompt.ReplyMarkup)[0]
-	r.games = &beforeGameTransaction{GameRepository: store.games, hook: func() {
+	r.games = &gameStoreHooks{GameRepository: store.games, beforeTransaction: func() {
 		r.handlePlanCallback(ctx, nil, makeCallbackUpdateForMessage(adminID, chatID, prompt.MessageID, "retry", choice))
 		r.handleReset(ctx, nil, makeTextUpdate(adminID, chatID, "/reset"))
 	}}

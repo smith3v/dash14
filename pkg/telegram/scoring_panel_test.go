@@ -632,3 +632,66 @@ func TestScoringPanelWritesWhileTelegramControlEditIsBlocked(t *testing.T) {
 		t.Fatalf("unexpected scoring response: %d %s", res.Code, res.Body.String())
 	}
 }
+
+func TestScoringPanelStaysBoundToCanceledGame(t *testing.T) {
+	store := openPlanTestStore(t)
+	r := NewRouter(nil, discardLogger(), &FakeBot{}, store.users, store.teams)
+	r.SetGameServices(store.games, nil)
+	mux := http.NewServeMux()
+	r.RegisterScoringPanel(mux, testScoringToken, testScoringURL)
+
+	const owner = 311
+	ctx := t.Context()
+	store.createAdminUser(t, owner, "owner")
+	match := createCurrentPlannedGame(t, store, owner)
+	match.Status = storage.GameStatusInProgress
+	if err := store.games.SaveGame(match); err != nil {
+		t.Fatal(err)
+	}
+	set := &storage.GameSet{GameID: match.ID, SetNumber: 1, HomeScore: 14}
+	if err := store.games.CreateSet(set); err != nil {
+		t.Fatal(err)
+	}
+
+	auth := signedScoringLaunch(testScoringToken, owner, time.Now())
+	boundState := func(id uint, want int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/scoring/state?gameId=%d", id), nil)
+		req.Header.Set("Authorization", "tma "+auth)
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code != want {
+			t.Fatalf("bound state for game %d: got %d %s, want %d", id, res.Code, res.Body.String(), want)
+		}
+	}
+	old := &scoringCommand{GameID: match.ID, SetID: set.ID, RequestID: uuid.New(), Action: scoreHomeUp}
+	boundState(match.ID, http.StatusOK)
+
+	r.handleReset(ctx, nil, makeTextUpdate(owner, owner, "/reset"))
+	boundState(match.ID, http.StatusForbidden)
+	scoringRequest(t, mux, auth, old, http.StatusForbidden)
+
+	r.handlePlan(ctx, nil, makeTextUpdate(owner, owner, "/plan"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(owner, owner, "Control Home"))
+	r.handlePlanText(ctx, nil, makePlainTextUpdate(owner, owner, "Control Guest"))
+	next, err := store.games.GetCurrentGame()
+	if err != nil || next == nil || next.ID == match.ID {
+		t.Fatalf("new game = %+v, %v", next, err)
+	}
+	next.Status = storage.GameStatusInProgress
+	if err := store.games.SaveGame(next); err != nil {
+		t.Fatal(err)
+	}
+	nextSet := &storage.GameSet{GameID: next.ID, SetNumber: 1}
+	if err := store.games.CreateSet(nextSet); err != nil {
+		t.Fatal(err)
+	}
+
+	boundState(match.ID, http.StatusForbidden)
+	scoringRequest(t, mux, auth, old, http.StatusForbidden)
+	boundState(next.ID, http.StatusOK)
+	state := scoringRequest(t, mux, auth, nil, http.StatusOK)
+	if state.GameID != next.ID || state.SetID != nextSet.ID || state.Home.Score != 0 || state.Guest.Score != 0 {
+		t.Fatalf("stale panel changed next set: %+v", state)
+	}
+}
