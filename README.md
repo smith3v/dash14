@@ -10,7 +10,7 @@ It stores match state in SQLite, serves OBS-ready overlays over HTTP, and expose
 - OBS overlay rendering for planned, live, between-set intermission, and finished states
 - Separate intermission scoreboard page with per-set history for compatibility OBS setups
 - Telegram subscriber flow (`/start`, `/stop`)
-- Admin-only game planning and control (`/plan`, `/game`, `/takeover`)
+- Admin access management (`/admin`) and admin-only game planning and control (`/plan`, `/game`, `/takeover`)
 - Read-only broadcast updates to subscribed users for game start, score changes, next-set start, and match finish
 - Persistent state in SQLite
 
@@ -206,9 +206,14 @@ What it does:
 
 ## Admin Setup
 
-Admin rights are stored in SQLite (`users.is_admin`) and are currently managed manually.
+Use `/admin` in a private chat with the bot. A regular user can request access.
+Admins can approve or deny requests from the bot's message or the **Pending
+requests** menu. To revoke access, select a person in the admin list and
+confirm **Revoke access**. If the person was controlling the current match,
+a remaining admin can run `/takeover` and then `/game` to resume scoring.
 
-Example SQL (run after user has appeared via `/start`):
+Bootstrap the first admin in SQLite after they open a private chat with the
+bot and send `/admin` or `/start`. The example below uses their Telegram user ID.
 
 ```sql
 UPDATE users

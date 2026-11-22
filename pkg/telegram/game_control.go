@@ -21,12 +21,12 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 	chatID := update.Message.Chat.ID
 	r.logger.InfoContext(ctx, "received /game", "user_id", userID)
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
+	admin, err := r.requireAdmin(ctx, userID, chatID)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "handleGame: requireAdmin failed", "user_id", userID, "err", err)
 		return
 	}
-	if !ok {
+	if admin == nil {
 		return
 	}
 
@@ -80,6 +80,9 @@ func (r *Router) handleGame(ctx context.Context, _ *bot.Bot, update *models.Upda
 	}
 
 	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+		if err := repo.RequireAdminVersion(userID, admin.AdminVersion); err != nil {
+			return err
+		}
 		return repo.SetGameControl(game, userID, chatID, msg.ID)
 	}); err != nil {
 		r.logger.ErrorContext(ctx, "handleGame: save game failed", "game_id", game.ID, "err", err)
@@ -106,8 +109,8 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 		CallbackQueryID: cb.ID,
 	})
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
-	if err != nil || !ok {
+	admin, err := r.requireAdmin(ctx, userID, chatID)
+	if err != nil || admin == nil {
 		return
 	}
 
@@ -135,6 +138,9 @@ func (r *Router) handleGameCallback(ctx context.Context, _ *bot.Bot, update *mod
 	var committedGame *storage.Game
 	var committedSets []storage.GameSet
 	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
+		if err := repo.RequireAdminVersion(userID, admin.AdminVersion); err != nil {
+			return err
+		}
 		txGame, err := repo.GetGameByID(game.ID)
 		if err != nil {
 			return err

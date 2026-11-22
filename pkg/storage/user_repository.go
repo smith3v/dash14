@@ -23,12 +23,21 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 // insert the Subscribed flag is set to true so that the user immediately
 // receives broadcasts after /start. Subsequent calls update only the profile
 // fields, leaving Subscribed and IsAdmin intact.
-func (r *UserRepository) UpsertTelegramUser(telegramUserID int64, username string, displayName string) error {
+func (r *UserRepository) UpsertTelegramUser(telegramUserID int64, username, displayName string) error {
+	return r.upsertTelegramProfile(telegramUserID, username, displayName, true)
+}
+
+// UpsertTelegramContact records a profile without subscribing a new contact.
+func (r *UserRepository) UpsertTelegramContact(telegramUserID int64, username, displayName string) error {
+	return r.upsertTelegramProfile(telegramUserID, username, displayName, false)
+}
+
+func (r *UserRepository) upsertTelegramProfile(telegramUserID int64, username, displayName string, subscribed bool) error {
 	user := User{
 		TelegramUserID: telegramUserID,
 		Username:       username,
 		DisplayName:    displayName,
-		Subscribed:     true,
+		Subscribed:     subscribed,
 	}
 	result := r.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "telegram_user_id"}},

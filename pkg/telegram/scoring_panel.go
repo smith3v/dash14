@@ -98,7 +98,7 @@ func scoringAsset(contentType string, body []byte) http.HandlerFunc {
 	}
 }
 
-func (p *scoringPanel) operator(w http.ResponseWriter, r *http.Request) (int64, bool) {
+func (p *scoringPanel) operator(w http.ResponseWriter, r *http.Request) *storage.User {
 	auth, ok := strings.CutPrefix(r.Header.Get("Authorization"), "tma ")
 	if ok {
 		if userID, valid := telegramMiniAppUser(p.token, auth, time.Now()); valid {
@@ -109,18 +109,18 @@ func (p *scoringPanel) operator(w http.ResponseWriter, r *http.Request) (int64, 
 			case err != nil:
 				p.writeError(w, r, err)
 			default:
-				return userID, true
+				return user
 			}
-			return 0, false
+			return nil
 		}
 	}
 	scoringJSON(w, http.StatusUnauthorized, map[string]string{"error": "Reopen the scoring panel from /game in Telegram."})
-	return 0, false
+	return nil
 }
 
 func (p *scoringPanel) serveState(w http.ResponseWriter, r *http.Request) {
-	userID, ok := p.operator(w, r)
-	if !ok {
+	operator := p.operator(w, r)
+	if operator == nil {
 		return
 	}
 	var gameID uint
@@ -132,12 +132,12 @@ func (p *scoringPanel) serveState(w http.ResponseWriter, r *http.Request) {
 		}
 		gameID = uint(id)
 	}
-	p.respond(w, r, userID, gameID, nil)
+	p.respond(w, r, operator, gameID, nil)
 }
 
 func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
-	userID, ok := p.operator(w, r)
-	if !ok {
+	operator := p.operator(w, r)
+	if operator == nil {
 		return
 	}
 	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -158,7 +158,7 @@ func (p *scoringPanel) serveAction(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
 	}
-	p.respond(w, r, userID, cmd.GameID, &cmd)
+	p.respond(w, r, operator, cmd.GameID, &cmd)
 }
 
 func (cmd scoringCommand) validAction() bool {
@@ -168,12 +168,15 @@ func (cmd scoringCommand) validAction() bool {
 	return isScoringAction(cmd.Action) && cmd.SetID != 0 && cmd.Revision == ""
 }
 
-func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID int64, gameID uint, cmd *scoringCommand) {
+func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, operator *storage.User, gameID uint, cmd *scoringCommand) {
 	var state scoringState
 	var committedGame *storage.Game
 	var committedSets []storage.GameSet
 	var home, guest *storage.Team
 	err := p.router.games.WithinTxContext(r.Context(), func(repo *storage.GameRepository) error {
+		if err := repo.RequireAdminVersion(operator.TelegramUserID, operator.AdminVersion); err != nil {
+			return err
+		}
 		var match *storage.Game
 		var err error
 		if gameID == 0 {
@@ -190,7 +193,7 @@ func (p *scoringPanel) respond(w http.ResponseWriter, r *http.Request, userID in
 		if match == nil {
 			return errNoCurrentGame
 		}
-		if match.CurrentAdminUserID != userID {
+		if match.CurrentAdminUserID != operator.TelegramUserID {
 			if gameID != 0 {
 				return errScoringControlLost
 			}
@@ -299,7 +302,7 @@ func (p *scoringPanel) writeError(w http.ResponseWriter, r *http.Request, err er
 	status := http.StatusConflict
 	var message string
 	switch {
-	case errors.Is(err, errScoringOwner):
+	case errors.Is(err, errScoringOwner), errors.Is(err, storage.ErrAdminUnauthorized):
 		status, message = http.StatusForbidden, errScoringOwner.Error()
 	case errors.Is(err, errScoringControlLost):
 		status, message = http.StatusForbidden, errScoringControlLost.Error()

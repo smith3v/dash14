@@ -15,6 +15,7 @@ import (
 // planState holds the conversation state for a single admin's in-progress /plan
 // wizard. Fields are populated as the wizard advances through its steps.
 type planState struct {
+	AdminVersion int64
 	// HomeTeam is set once the admin has selected (or auto-selected) the home
 	// team. While it is nil the wizard is waiting for a home-team search query.
 	HomeTeam    *storage.Team
@@ -46,13 +47,13 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 
 	r.logger.InfoContext(ctx, "received /plan", "user_id", userID)
 
-	ok, err := r.requireAdmin(ctx, userID, chatID)
+	admin, err := r.requireAdmin(ctx, userID, chatID)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "handlePlan: requireAdmin failed",
 			"user_id", userID, "err", err)
 		return
 	}
-	if !ok {
+	if admin == nil {
 		return
 	}
 	if r.games == nil || r.teams == nil {
@@ -78,7 +79,7 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		return
 	}
 	if current == nil {
-		r.startPlanTeamSelection(ctx, userID, chatID, &planState{})
+		r.startPlanTeamSelection(ctx, userID, chatID, &planState{AdminVersion: admin.AdminVersion})
 		return
 	}
 
@@ -115,7 +116,7 @@ func (r *Router) handlePlan(ctx context.Context, _ *bot.Bot, update *models.Upda
 		})
 
 	case storage.GameStatusPlanned:
-		state := &planState{Replacement: &plannedGameReplacement{
+		state := &planState{AdminVersion: admin.AdminVersion, Replacement: &plannedGameReplacement{
 			GameID:                   current.ID,
 			ExpectedHomeTeamID:       current.HomeTeamID,
 			ExpectedGuestTeamID:      current.GuestTeamID,
@@ -196,6 +197,9 @@ func (r *Router) handlePlanText(ctx context.Context, _ *bot.Bot, update *models.
 		return
 	}
 	state := raw.(*planState)
+	if !r.checkPlanAdmin(ctx, userID, chatID, state) {
+		return
+	}
 	if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
 		return
 	}
@@ -264,7 +268,7 @@ func (r *Router) searchAndSelectHomeTeam(
 		for _, team := range teams {
 			btn := models.InlineKeyboardButton{
 				Text:         team.Name,
-				CallbackData: fmt.Sprintf("plan:home:%d", team.ID),
+				CallbackData: planTeamPrefix("home", state.AdminVersion) + strconv.FormatUint(uint64(team.ID), 10),
 			}
 			buttons = append(buttons, []models.InlineKeyboardButton{btn})
 		}
@@ -284,9 +288,24 @@ func (r *Router) searchAndSelectHomeTeam(
 	}
 }
 
-// handlePlanCallback handles inline keyboard callbacks whose data starts with
-// "plan:". Currently only "plan:home:<teamID>" is handled; guest callbacks
-// will be added in Task 17.
+func planTeamPrefix(side string, adminVersion int64) string {
+	return fmt.Sprintf("plan:%s:%d:", side, adminVersion)
+}
+
+func (r *Router) checkPlanAdmin(ctx context.Context, userID, chatID int64, state *planState) bool {
+	admin, err := r.requireAdmin(ctx, userID, chatID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "check planning admin", "user_id", userID, "err", err)
+		return false
+	}
+	if admin == nil || admin.AdminVersion != state.AdminVersion {
+		r.plans.CompareAndDelete(userID, state)
+		return false
+	}
+	return true
+}
+
+// handlePlanCallback handles the inline choices in the planning wizard.
 func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil || update.CallbackQuery.From.ID == 0 || update.CallbackQuery.Message.Message == nil {
 		return
@@ -306,7 +325,12 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		return
 	}
 	state := raw.(*planState)
+	if !r.checkPlanAdmin(ctx, userID, chatID, state) {
+		return
+	}
 
+	homePrefix := planTeamPrefix("home", state.AdminVersion)
+	guestPrefix := planTeamPrefix("guest", state.AdminVersion)
 	switch {
 	case data == "plan:replace:keep":
 		if !matchesReplacementConfirmation(state.Replacement, chatID, update.CallbackQuery.Message.Message.ID) {
@@ -344,11 +368,11 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 		state.Replacement.AwaitingConfirmation = false
 		r.startPlanTeamSelection(ctx, userID, chatID, state)
 
-	case strings.HasPrefix(data, "plan:home:"):
+	case strings.HasPrefix(data, homePrefix):
 		if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
 			return
 		}
-		idStr := strings.TrimPrefix(data, "plan:home:")
+		idStr := strings.TrimPrefix(data, homePrefix)
 		id, err := strconv.ParseUint(idStr, 10, 64)
 		if err != nil {
 			r.logger.WarnContext(ctx, "handlePlanCallback: invalid team id in callback",
@@ -375,11 +399,11 @@ func (r *Router) handlePlanCallback(ctx context.Context, _ *bot.Bot, update *mod
 			Text:   fmt.Sprintf("Home team: %s\nPlease enter the guest team name:", team.Name),
 		})
 
-	case strings.HasPrefix(data, "plan:guest:"):
+	case strings.HasPrefix(data, guestPrefix):
 		if state.Replacement != nil && state.Replacement.AwaitingConfirmation {
 			return
 		}
-		idStr := strings.TrimPrefix(data, "plan:guest:")
+		idStr := strings.TrimPrefix(data, guestPrefix)
 		id, err := strconv.ParseUint(idStr, 10, 64)
 		if err != nil {
 			r.logger.WarnContext(ctx, "handlePlanCallback: invalid guest team id in callback",
@@ -460,7 +484,7 @@ func (r *Router) searchAndSelectGuestTeam(
 		for _, team := range teams {
 			btn := models.InlineKeyboardButton{
 				Text:         team.Name,
-				CallbackData: fmt.Sprintf("plan:guest:%d", team.ID),
+				CallbackData: planTeamPrefix("guest", state.AdminVersion) + strconv.FormatUint(uint64(team.ID), 10),
 			}
 			buttons = append(buttons, []models.InlineKeyboardButton{btn})
 		}
@@ -519,6 +543,9 @@ func (r *Router) finalizePlannedGame(
 	}
 
 	if err := r.games.WithinTx(func(repo *storage.GameRepository) error {
+		if err := repo.RequireAdminVersion(userID, state.AdminVersion); err != nil {
+			return err
+		}
 		if isReplacement {
 			return repo.ReplacePlannedGame(
 				state.Replacement.GameID,

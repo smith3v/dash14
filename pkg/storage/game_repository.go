@@ -39,6 +39,22 @@ func (r *GameRepository) WithinTxContext(ctx context.Context, fn func(repo *Game
 	return NewGameRepository(r.db.WithContext(ctx)).WithinTx(fn)
 }
 
+// RequireAdminVersion checks game authorization using the same database
+// snapshot as the game write.
+func (r *GameRepository) RequireAdminVersion(userID, version int64) error {
+	user, err := NewUserRepository(r.db).GetUserByTelegramID(userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrAdminUnauthorized
+	}
+	if err != nil {
+		return err
+	}
+	if !user.IsAdmin || user.AdminVersion != version {
+		return ErrAdminUnauthorized
+	}
+	return nil
+}
+
 // CreateGame inserts a new Game record and populates its ID on success.
 func (r *GameRepository) CreateGame(game *Game) error {
 	if err := r.db.Create(game).Error; err != nil {
