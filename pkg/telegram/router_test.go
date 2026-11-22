@@ -31,6 +31,7 @@ type sentMessage struct {
 	MessageID   int
 	ChatID      int64
 	Text        string
+	ParseMode   models.ParseMode
 	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
 }
 
@@ -39,6 +40,7 @@ type editedMessage struct {
 	ChatID      int64
 	MessageID   int
 	Text        string
+	ParseMode   models.ParseMode
 	ReplyMarkup interface{} // nil or *models.InlineKeyboardMarkup
 }
 
@@ -58,6 +60,7 @@ func (f *FakeBot) SendMessage(_ context.Context, params *bot.SendMessageParams) 
 		MessageID:   msgID,
 		ChatID:      chatID,
 		Text:        params.Text,
+		ParseMode:   params.ParseMode,
 		ReplyMarkup: params.ReplyMarkup,
 	})
 	return &models.Message{ID: msgID}, nil
@@ -73,6 +76,7 @@ func (f *FakeBot) EditMessageText(_ context.Context, params *bot.EditMessageText
 		ChatID:      chatID,
 		MessageID:   params.MessageID,
 		Text:        params.Text,
+		ParseMode:   params.ParseMode,
 		ReplyMarkup: params.ReplyMarkup,
 	})
 	return &models.Message{ID: params.MessageID}, nil

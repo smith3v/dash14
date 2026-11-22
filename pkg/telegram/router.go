@@ -33,8 +33,11 @@ type Router struct {
 	games               GameStore
 	gameChanged         func()
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
+	gameCallbackMu      sync.Mutex
 	broadcastQueueSize  int
-	broadcastJobs       chan broadcastJob
+	broadcastMu         sync.Mutex
+	broadcastJobs       []broadcastJob
+	broadcastReady      *sync.Cond
 	broadcastWorkerOnce sync.Once
 }
 
