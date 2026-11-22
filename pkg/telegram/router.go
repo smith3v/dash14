@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 
@@ -12,6 +13,7 @@ import (
 // GameStore captures the game persistence operations used by Telegram flows.
 type GameStore interface {
 	WithinTx(fn func(repo *storage.GameRepository) error) error
+	WithinTxContext(context.Context, func(*storage.GameRepository) error) error
 	CreateGame(game *storage.Game) error
 	CreateSet(set *storage.GameSet) error
 	GetCurrentGame() (*storage.Game, error)
@@ -33,8 +35,10 @@ type Router struct {
 	teams               *storage.TeamRepository
 	games               GameStore
 	gameChanged         func()
+	scoringPanelURL     string
+	controlEditMu       sync.Mutex
 	plans               sync.Map // map[int64]*planState — keyed by Telegram user ID
-	gameCallbackMu      sync.Mutex
+	gameActionMu        sync.Mutex
 	broadcastQueueSize  int
 	broadcastMu         sync.Mutex
 	broadcastJobs       []broadcastJob

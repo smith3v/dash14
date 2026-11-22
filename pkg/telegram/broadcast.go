@@ -3,19 +3,23 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
+	"html"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/smith3v/dash14/pkg/storage"
 )
 
 type broadcastJob struct {
 	text           string
 	excludeUserIDs []int64
-	gameID         uint // zero for an ordinary announcement
-	scoreChange    bool // a pending point update can be replaced by a newer scoreboard
+	gameID         uint            // zero for an ordinary announcement
+	scoreChange    bool            // a pending point update can be replaced by a newer scoreboard
+	after          <-chan struct{} // optional wait for the Telegram control edit
 }
 
 type scoreboardMessage struct {
@@ -36,6 +40,30 @@ func (r *Router) BroadcastExcept(ctx context.Context, text string, excludeUserID
 	r.enqueueBroadcast(ctx, broadcastJob{
 		text:           text,
 		excludeUserIDs: slices.Clone(excludeUserIDs),
+	})
+}
+
+func (r *Router) enqueueGameBroadcast(ctx context.Context, action string, match *storage.Game, home, guest *storage.Team, sets []storage.GameSet, after <-chan struct{}) {
+	homeName, guestName := html.EscapeString(home.Name), html.EscapeString(guest.Name)
+	if action == switchSides {
+		r.enqueueBroadcast(ctx, broadcastJob{
+			text:           fmt.Sprintf("Overlay sides reversed for %s vs %s", homeName, guestName),
+			excludeUserIDs: []int64{match.CurrentAdminUserID},
+			after:          after,
+		})
+		return
+	}
+
+	if match.Status == storage.GameStatusPlanned {
+		return
+	}
+	matchup := formatMatchup(home.Name, guest.Name)
+	r.enqueueBroadcast(ctx, broadcastJob{
+		text:           formatBroadcastScore(match, matchup, sets),
+		excludeUserIDs: []int64{match.CurrentAdminUserID},
+		gameID:         match.ID,
+		scoreChange:    isScoringAction(action),
+		after:          after,
 	})
 }
 
@@ -86,6 +114,9 @@ func (r *Router) broadcastLoop() {
 		if job.gameID != 0 && job.gameID != gameID {
 			gameID = job.gameID
 			scoreboards = make(map[int64]scoreboardMessage)
+		}
+		if job.after != nil {
+			<-job.after
 		}
 		r.performBroadcast(job, scoreboards)
 	}

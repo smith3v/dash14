@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,26 +31,26 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 		return
 	}
 
-	game, err := r.games.GetCurrentGame()
-	if err != nil {
-		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   "Something went wrong. Please try again.",
-		})
-		return
-	}
-	if game == nil {
+	var previousAdminID int64
+	err = r.games.WithinTx(func(repo *storage.GameRepository) error {
+		game, err := repo.GetCurrentGame()
+		if err != nil {
+			return err
+		}
+		if game == nil {
+			return errNoCurrentGame
+		}
+		previousAdminID = game.CurrentAdminUserID
+		return repo.SetGameControl(game, userID, 0, 0)
+	})
+	if errors.Is(err, errNoCurrentGame) {
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "No planned or active game is available.",
 		})
 		return
 	}
-
-	previousAdminID := game.CurrentAdminUserID
-	game.CurrentAdminUserID = userID
-	game.ControlMessageID = 0
-	if err := r.games.SaveGame(game); err != nil {
+	if err != nil {
 		_, _ = r.client.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: chatID,
 			Text:   "Something went wrong. Please try again.",
@@ -73,6 +74,8 @@ func (r *Router) handleTakeover(ctx context.Context, _ *bot.Bot, update *models.
 		Text:   "Takeover successful. Run /game to open a fresh control message.",
 	})
 }
+
+var errNoCurrentGame = errors.New("no current game")
 
 func takeoverAdminLabel(user *storage.User) string {
 	if user == nil {

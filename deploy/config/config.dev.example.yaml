@@ -2,6 +2,8 @@ http:
   listen_address: "0.0.0.0:8081"
 
 telegram:
+  # Optional HTTPS address used by /game in private chats.
+  # scoring_panel_url: "https://overlay.example.com/scoring"
   token: "123456789:AABBCCDDEEFFaabbccddeeff-example-token"
 
 sqlite:

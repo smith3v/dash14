@@ -9,7 +9,7 @@ import (
 // Migrate creates or updates the storage schema. It is safe to call on an
 // already-migrated database.
 func Migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&Team{}, &User{}, &Game{}, &GameSet{}); err != nil {
+	if err := db.AutoMigrate(&Team{}, &User{}, &Game{}, &GameSet{}, &scoringRequest{}); err != nil {
 		return fmt.Errorf("storage: automigrate: %w", err)
 	}
 

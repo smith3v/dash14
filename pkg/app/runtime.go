@@ -36,12 +36,13 @@ type runtimeDeps struct {
 	newLogoStore func(logoDir string) *importer.LogoStore
 	newImporter  func(repo *storage.TeamRepository, logos *importer.LogoStore) *importer.Importer
 	newTelegram  func(
-		token string,
+		cfg config.TelegramConfig,
 		logger *slog.Logger,
 		users *storage.UserRepository,
 		teams *storage.TeamRepository,
 		games *storage.GameRepository,
 		gameChanged func(),
+		mux *http.ServeMux,
 	) (func(context.Context), error)
 }
 
@@ -54,21 +55,29 @@ func defaultRuntimeDeps() runtimeDeps {
 		newLogoStore: importer.NewLogoStore,
 		newImporter:  importer.NewImporter,
 		newTelegram: func(
-			token string,
+			cfg config.TelegramConfig,
 			logger *slog.Logger,
 			users *storage.UserRepository,
 			teams *storage.TeamRepository,
 			games *storage.GameRepository,
 			gameChanged func(),
+			mux *http.ServeMux,
 		) (func(context.Context), error) {
-			b, err := telegram.New(token)
+			b, err := telegram.New(cfg.Token)
 			if err != nil {
 				return nil, err
 			}
 			r := telegram.NewRouter(b, logger, b, users, teams)
 			r.SetGameServices(games, gameChanged)
 			r.Register()
-			return b.Start, nil
+			if cfg.ScoringPanelURL == "" {
+				return b.Start, nil
+			}
+			runPanel := r.RegisterScoringPanel(mux, cfg.Token, cfg.ScoringPanelURL)
+			return func(ctx context.Context) {
+				go runPanel(ctx)
+				b.Start(ctx)
+			}, nil
 		},
 	}
 }
@@ -134,7 +143,9 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 		publisher.notify()
 	}
 
-	startTelegram, err := deps.newTelegram(cfg.Telegram.Token, logger, users, teams, games, publisher.notify)
+	mux := http.NewServeMux()
+	mux.Handle("/", publisher.web)
+	startTelegram, err := deps.newTelegram(cfg.Telegram, logger, users, teams, games, publisher.notify, mux)
 	if err != nil {
 		return fmt.Errorf("app: init telegram bot: %w", err)
 	}
@@ -157,7 +168,8 @@ func runWithDeps(ctx context.Context, opts Options, deps runtimeDeps) error {
 	}()
 
 	server := &http.Server{
-		Handler:           publisher.web,
+		Handler:           mux,
+		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
